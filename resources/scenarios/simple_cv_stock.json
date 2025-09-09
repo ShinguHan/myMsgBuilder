@@ -1,0 +1,20 @@
+{
+    "name": "Simple Conveyor to Stocker Process",
+    "steps": [
+        {
+            "device_id": "CV_01",
+            "message_id": "S2F41_HostCommand_START",
+            "delay": 0.5
+        },
+        {
+            "device_id": "STK_01",
+            "message_id": "S5F1_AlarmReport",
+            "delay": 1.0
+        },
+        {
+            "device_id": "CV_01",
+            "message_id": "S1F1_AreYouThere",
+            "delay": 0
+        }
+    ]
+}
