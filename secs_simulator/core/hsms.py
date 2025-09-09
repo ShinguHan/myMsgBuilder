@@ -4,7 +4,7 @@ from enum import IntEnum
 from typing import Optional
 
 from .secs_parser import parse_body
-from .secs_builder import build_message_body
+from .secs_builder import build_secs_body
 
 class HsmsMessageType(IntEnum):
     """SEMI E37 HSMS Message Types."""
@@ -88,7 +88,7 @@ class HsmsConnection:
 
     async def send_secs_message(self, s: int, f: int, system_bytes: int, body_obj: Optional[list] = None) -> None:
         """Constructs and sends a SECS-II data message."""
-        body_bytes = build_message_body(body_obj or [])
+        body_bytes = build_secs_body(body_obj or [])
         await self.send_hsms_message(HsmsMessageType.DATA_MESSAGE, system_bytes, s, f, body=body_bytes)
 
     async def send_hsms_message(
