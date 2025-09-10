@@ -5,6 +5,7 @@ from typing import Dict
 
 from secs_simulator.engine.orchestrator import Orchestrator
 from secs_simulator.ui.device_status_widget import DeviceStatusWidget
+import asyncio # 추가
 
 class MainWindow(QMainWindow):
     """애플리케이션의 메인 윈도우 클래스."""
@@ -36,9 +37,14 @@ class MainWindow(QMainWindow):
         left_layout = QVBoxLayout(left_panel)
         
         control_layout = QHBoxLayout()
-        self.start_button = QPushButton("Start All Agents")
-        self.stop_button = QPushButton("Stop All Agents")
+        self.start_button = QPushButton("🚀 Start All Agents")
+        self.stop_button = QPushButton("⏹️ Stop All Agents")
         self.stop_button.setEnabled(False)
+
+        # ✅ 버튼 클릭 시그널을 해당 메소드에 연결
+        self.start_button.clicked.connect(self.start_agents)
+        self.stop_button.clicked.connect(self.stop_agents)
+
         control_layout.addWidget(self.start_button)
         control_layout.addWidget(self.stop_button)
         left_layout.addLayout(control_layout)
@@ -61,6 +67,31 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(left_panel, 1)
         main_layout.addWidget(right_panel, 2)
+
+    # ✅ 아래 메소드들을 클래스에 추가
+    def start_agents(self):
+        """'Start All Agents' 버튼 클릭 시 실행될 슬롯."""
+        self.log_display.append("--- Starting all agents... ---")
+        # asyncio.create_task를 사용해 UI 멈춤 없이 비동기 함수를 실행
+        asyncio.create_task(self.orchestrator.start_all_agents())
+        self.start_button.setEnabled(False)
+        self.stop_button.setEnabled(True)
+
+    def stop_agents(self):
+        """'Stop All Agents' 버튼 클릭 시 실행될 슬롯."""
+        self.log_display.append("--- Stopping all agents... ---")
+        asyncio.create_task(self.orchestrator.stop_all_agents())
+        self.start_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
+
+    def closeEvent(self, event):
+        """윈도우가 닫힐 때 모든 에이전트를 확실히 종료시킵니다."""
+        print("Closing application, stopping all agents...")
+        # stop_agents가 비동기라 바로 종료하면 안되므로, loop에서 실행
+        loop = asyncio.get_event_loop()
+        # loop.create_task(self.orchestrator.stop_all_agents()) # 더 나은 방식
+        loop.run_until_complete(self.orchestrator.stop_all_agents())
+        event.accept()
 
     def populate_device_widgets(self, device_configs: dict):
         """Orchestrator로부터 장비 설정을 받아와 위젯을 동적으로 생성합니다."""

@@ -1,35 +1,60 @@
+# main.py
 import sys
 import asyncio
 import qasync
 
 from PySide6.QtWidgets import QApplication
 
-# 향후 구현될 클래스들을 임포트합니다.
-# from secs_simulator.engine.orchestrator import SimulationOrchestrator
-# from secs_simulator.ui.main_window import MainWindow
+from secs_simulator.engine.orchestrator import Orchestrator
+from secs_simulator.ui.main_window import MainWindow
+
+async def status_update_callback(window: MainWindow, device_id: str, status: str):
+    """Orchestrator가 UI 업데이트를 위해 호출할 콜백. UI의 Signal을 emit합니다."""
+    # 상태 메시지에 따라 색상을 결정하는 간단한 로직
+    color = "gray"
+    if "Listening" in status: color = "orange"
+    elif "Connected" in status or "Sent" in status: color = "green"
+    elif "Error" in status: color = "red"
+    
+    window.agent_status_updated.emit(device_id, status, color)
 
 async def main():
     """애플리케이션의 메인 비동기 로직."""
-    print("SECS/GEM Simulator application starting...")
     
-    # UI 및 엔진 초기화 로직 (5장에서 구체화)
-    # orchestrator = SimulationOrchestrator(...)
-    # window = MainWindow(orchestrator)
-    # window.show()
+    # MainWindow 인스턴스를 먼저 생성해야 콜백에서 참조 가능
+    window = None 
+    
+    async def callback_wrapper(dev_id, msg):
+        # window 객체가 생성된 후에만 콜백이 동작하도록 보장
+        if window:
+            # 비동기 콜백을 asyncio 루프에서 안전하게 실행
+            asyncio.create_task(status_update_callback(window, dev_id, msg))
 
-    # qasync 이벤트 루프가 계속 실행되도록 Future를 반환합니다.
+    # 1. Orchestrator 인스턴스 생성
+    orchestrator = Orchestrator(status_callback=callback_wrapper)
+
+    # 2. 장비 설정 파일 로드
+    device_configs = orchestrator.load_device_configs('./secs_simulator/engine/devices.json')
+
+    # ✅ 3. 메인 윈도우 생성 및 Orchestrator와 연결 (이 부분을 수정합니다)
+    window = MainWindow(orchestrator)
+    
+    # get_device_configs()를 호출하여 전체 설정 '딕셔너리'를 가져옵니다.
+    device_configs_dict = orchestrator.get_device_configs()
+    window.populate_device_widgets(device_configs_dict) 
+    
+    window.show()
+
+    # qasync 이벤트 루프가 계속 실행되도록 Future를 반환
     await asyncio.get_event_loop().create_future()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
 
-    # qasync를 사용하여 asyncio 이벤트 루프를 설정합니다.
     loop = qasync.QEventLoop(app)
     asyncio.set_event_loop(loop)
 
     try:
-        print("Starting event loop...")
         loop.run_until_complete(main())
     except KeyboardInterrupt:
         loop.close()
-        print("Application terminated by user.")
