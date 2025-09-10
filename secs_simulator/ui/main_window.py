@@ -5,7 +5,7 @@ from typing import Dict
 
 from secs_simulator.engine.orchestrator import Orchestrator
 from secs_simulator.ui.device_status_widget import DeviceStatusWidget
-from secs_simulator.ui.scenario_editor_widget import ScenarioEditorWidget
+from secs_simulator.ui.scenario_editor.scenario_editor_widget import ScenarioEditorWidget
 from secs_simulator.engine.scenario_manager import ScenarioManager # ScenarioManager 임포트
 import asyncio # 추가
 
@@ -85,10 +85,20 @@ class MainWindow(QMainWindow):
         
         # 시나리오 제어 버튼 추가
         scenario_control_layout = QHBoxLayout()
-        self.run_scenario_button = QPushButton("📂 Load & Run Scenario...")
-        self.run_scenario_button.clicked.connect(self.load_and_run_scenario)
-        scenario_control_layout.addWidget(self.run_scenario_button)
+        load_button = QPushButton("📂 Load Scenario...")
+        save_button = QPushButton("💾 Save Scenario...")
+        self.run_button = QPushButton("▶ Run Edited Scenario")
+        self.run_button.setStyleSheet("background-color: #3478F6; color: white; font-weight: bold;") # Apple Blue
+
+        # ✅ 버튼 클릭 시그널을 새로운 메서드에 연결합니다.
+        load_button.clicked.connect(self.load_scenario_from_file) # 9장에서 구현 예정
+        save_button.clicked.connect(self.save_scenario_to_file) # 9장에서 구현 예정
+        self.run_button.clicked.connect(self.run_edited_scenario)
+
+        scenario_control_layout.addWidget(load_button)
+        scenario_control_layout.addWidget(save_button)
         scenario_control_layout.addStretch()
+        scenario_control_layout.addWidget(self.run_button)
 
         right_layout.addLayout(editor_log_splitter)
         right_layout.addLayout(scenario_control_layout)
@@ -163,4 +173,28 @@ class MainWindow(QMainWindow):
             self.orchestrator.run_scenario(scenario_data)
         else:
             self.log_display.append("--- Failed to load or prepare scenario. ---")
+
+    # ✅ 아래 메서드를 클래스에 새로 추가합니다.
+    def run_edited_scenario(self):
+        """현재 비주얼 편집기에서 만들어진 시나리오를 데이터로 변환하여 실행합니다."""
+        if not self.stop_button.isEnabled():
+            self.log_display.append("--- Please start agents before running a scenario. ---")
+            return
+        
+        scenario_data = self.editor_widget.export_to_scenario_data()
+        if not scenario_data or not scenario_data.get("steps"):
+            self.log_display.append("--- Scenario is empty. Add steps to the timeline. ---")
+            return
+            
+        self.log_display.append(f"--- Running scenario '{scenario_data['name']}'... ---")
+        self.orchestrator.run_scenario(scenario_data)
+
+    # ❗ 기존 load_and_run_scenario는 잠시 비활성화하거나 이름을 바꾸어 둡니다.
+    def load_scenario_from_file(self):
+        print("Load from file: to be implemented in Chapter 9")
+        pass # 9장에서 구현 예정
+
+    def save_scenario_to_file(self):
+        print("Save to file: to be implemented in Chapter 9")
+        pass # 9장에서 구현 예정
             

@@ -4,6 +4,7 @@ import asyncio
 import qasync
 
 from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QFile, QTextStream
 
 from secs_simulator.engine.orchestrator import Orchestrator
 from secs_simulator.ui.main_window import MainWindow
@@ -45,6 +46,15 @@ async def main():
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+
+    # ✅ 스타일시트 파일을 읽어 앱 전체에 적용합니다.
+    try:
+        qss_file = QFile("./secs_simulator/ui/styles/apple_style.qss")
+        if qss_file.open(QFile.OpenModeFlag.ReadOnly | QFile.OpenModeFlag.Text):
+            stream = QTextStream(qss_file)
+            app.setStyleSheet(stream.readAll())
+    except Exception as e:
+        print(f"Could not load stylesheet: {e}")
 
     loop = qasync.QEventLoop(app)
     asyncio.set_event_loop(loop)

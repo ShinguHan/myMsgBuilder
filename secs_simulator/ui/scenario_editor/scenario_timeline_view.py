@@ -1,47 +1,64 @@
-from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QLabel
-from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QGraphicsView, QGraphicsScene
+from PySide6.QtCore import Signal, Qt
+
+# 방금 만든 ScenarioStepItem을 임포트합니다.
+from .scenario_step_item import ScenarioStepItem
 
 class ScenarioTimelineView(QGraphicsView):
-    """드래그된 메시지를 드롭하여 시나리오 스텝을 생성하는 뷰입니다."""
+    """
+    드래그된 메시지를 드롭하여 ScenarioStepItem을 생성하는 뷰입니다.
+    """
+    # 선택된 스텝 아이템의 정보를 외부(PropertyEditor)로 전달하기 위한 시그널
+    step_selected = Signal(object) 
 
-    def __init__(self, parent=None):
+    def __init__(self, scenario_manager, parent=None):
         super().__init__(parent)
+        self.scenario_manager = scenario_manager # 메시지 정보를 가져오기 위해 필요
         self.scene = QGraphicsScene(self)
         self.setScene(self.scene)
-        self.setAcceptDrops(True)  # 드롭 기능 활성화
-        self.y_pos_counter = 10  # 스텝이 쌓일 y 좌표
+        self.setAcceptDrops(True)
+        self.y_pos_counter = 10
 
     def dragEnterEvent(self, event):
-        """드래그된 아이템이 우리 뷰에 들어왔을 때 유효성을 검사합니다."""
-        mime_data = event.mimeData()
-        if mime_data.hasFormat('application/x-qabstractitemmodeldatalist'):
-            # MessageLibraryView에서 온 아이템인지 간단히 확인
+        if event.mimeData().hasText() and event.mimeData().text().startswith("secs-message/"):
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasText() and event.mimeData().text().startswith("secs-message/"):
             event.acceptProposedAction()
 
     def dropEvent(self, event):
-        """아이템이 드롭되었을 때 실행되는 로직입니다."""
-        mime_data = event.mimeData()
-        if not mime_data.hasFormat('application/x-qabstractitemmodeldatalist'):
+        """드롭 시 단순 QLabel 대신 ScenarioStepItem을 생성합니다."""
+        mime_text = event.mimeData().text()
+        if not mime_text.startswith("secs-message/"):
             return
 
-        # QTreeWidget의 기본 MIME 데이터에서 UserRole 데이터를 추출합니다.
-        encoded_data = mime_data.data('application/x-qabstractitemmodeldatalist')
-        # 복잡한 디코딩 대신, QTreeWidget의 내부 드래그 정보를 활용하는 것이 더 안정적입니다.
-        # 여기서는 임시로 드래그된 텍스트를 가져오는 방식을 사용합니다.
-        # 실제로는 dropMimeData를 오버라이드하는 것이 더 좋습니다.
+        _, device_type, message_id = mime_text.split('/')
         
-        # 임시 해결책: 드래그 소스 위젯에 접근할 수 없으므로,
-        # 드롭된 아이템의 텍스트를 기반으로 정보를 재구성합니다.
-        # 이는 한계가 있으며, 8장에서 데이터 모델 중심으로 개선될 것입니다.
-        # 지금은 시각적인 기초를 다지는 데 집중합니다.
+        # ScenarioManager를 통해 메시지의 전체 정보(body 등)를 가져옵니다.
+        # 이 get_message_body 메소드는 잠시 후에 ScenarioManager에 추가할 것입니다.
+        message_body = self.scenario_manager.get_message_body(device_type, message_id)
+        if not message_body:
+            print(f"Warning: Message body for {device_type}/{message_id} not found.")
+            return
+
+        # ScenarioStepItem이 가질 초기 데이터 모델을 생성합니다.
+        step_data = {
+            "device_id": "Select Device...", # 기본값
+            "delay": 0.0,
+            "message_id": message_id,
+            "message": message_body,
+            "device_type": device_type # PropertyEditor에서 사용될 정보
+        }
         
-        # TODO: 8장에서 데이터 모델 기반으로 재설계 필요
-        # 임시로 라벨을 추가하여 시각적 피드백만 제공합니다.
-        temp_label = QLabel("New Step Dropped (Data will be linked later)")
-        temp_label.setStyleSheet("background-color: white; border: 1px solid blue; padding: 10px; border-radius: 5px;")
+        # 데이터와 함께 똑똑한 아이템을 생성합니다.
+        item = ScenarioStepItem(step_data)
+        # 아이템이 클릭되면, step_selected 시그널을 통해 자신의 정보를 외부에 알립니다.
+        item.signals.selected.connect(self.step_selected.emit)
+        self.scene.addItem(item)
         
-        proxy_widget = self.scene.addWidget(temp_label)
-        proxy_widget.setPos(10, self.y_pos_counter) 
-        self.y_pos_counter += proxy_widget.boundingRect().height() + 10
-        
+        item.setPos(10, self.y_pos_counter)
+        self.y_pos_counter += item.boundingRect().height() + 10
+
         event.acceptProposedAction()
+
