@@ -6,29 +6,37 @@ from .message_library_view import MessageLibraryView
 from .scenario_timeline_view import ScenarioTimelineView
 from .property_editor import PropertyEditor
 
+# 필요한 클래스들을 임포트합니다.
+from secs_simulator.engine.scenario_manager import ScenarioManager
+
 class ScenarioEditorWidget(QWidget):
     """
     비주얼 시나리오 편집기의 3단 패널을 통합하고 관리하는 메인 위젯입니다.
     """
 
-    def __init__(self, parent=None):
+    # ✅ __init__ 메서드가 scenario_manager와 device_configs를 받도록 수정합니다.
+    def __init__(self, scenario_manager: ScenarioManager, device_configs: dict, parent=None):
         super().__init__(parent)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         
-        # QSplitter는 사용자가 경계를 드래그하여 각 패널의 크기를 조절할 수 있게 해주는 위젯입니다.
         splitter = QSplitter(Qt.Orientation.Horizontal)
         layout.addWidget(splitter)
 
         # 각 패널에 해당하는 위젯 인스턴스를 생성합니다.
         self.library_view = MessageLibraryView()
-        self.timeline_view = ScenarioTimelineView()
-        self.property_editor = PropertyEditor()
+        # ✅ 생성할 때 받은 scenario_manager를 ScenarioTimelineView에 전달합니다.
+        self.timeline_view = ScenarioTimelineView(scenario_manager)
+        # ✅ 생성할 때 받은 device_configs를 PropertyEditor에 전달합니다.
+        self.property_editor = PropertyEditor(device_configs)
 
         # 스플리터에 위젯들을 순서대로 추가합니다.
         splitter.addWidget(self.library_view)
         splitter.addWidget(self.timeline_view)
         splitter.addWidget(self.property_editor)
         
-        # 초기 패널 너비 비율을 보기 좋게 설정합니다.
-        splitter.setSizes([200, 500, 250])
+        splitter.setSizes([200, 500, 300])
+
+        # 타임라인 뷰에서 step_selected 시그널이 발생하면,
+        # 속성 편집기의 display_step_properties 메소드를 호출하도록 연결합니다.
+        self.timeline_view.step_selected.connect(self.property_editor.display_step_properties)

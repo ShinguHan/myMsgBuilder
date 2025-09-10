@@ -1,50 +1,64 @@
-from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QLabel
-from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QGraphicsView, QGraphicsScene
+from PySide6.QtCore import Signal, Qt
+
+# 방금 만든 ScenarioStepItem을 임포트합니다.
+from .scenario_step_item import ScenarioStepItem
 
 class ScenarioTimelineView(QGraphicsView):
     """
-    드래그된 메시지를 드롭하여 시나리오 스텝을 생성하는 뷰입니다.
-    Qt의 강력한 2D 그래픽 시스템(Graphics View Framework)을 사용합니다.
+    드래그된 메시지를 드롭하여 ScenarioStepItem을 생성하는 뷰입니다.
     """
+    # 선택된 스텝 아이템의 정보를 외부(PropertyEditor)로 전달하기 위한 시그널
+    step_selected = Signal(object) 
 
-    def __init__(self, parent=None):
+    def __init__(self, scenario_manager, parent=None):
         super().__init__(parent)
+        self.scenario_manager = scenario_manager # 메시지 정보를 가져오기 위해 필요
         self.scene = QGraphicsScene(self)
         self.setScene(self.scene)
-        self.setAcceptDrops(True)  # 이 위젯이 드롭 이벤트를 받을 수 있도록 설정
-        self.y_pos_counter = 10  # 스텝이 쌓일 y 좌표
+        self.setAcceptDrops(True)
+        self.y_pos_counter = 10
 
     def dragEnterEvent(self, event):
-        """드래그된 아이템이 우리 뷰 영역에 들어왔을 때 호출됩니다."""
-        # 우리가 정의한 "secs-message/" 형식의 텍스트 데이터가 맞는지 확인합니다.
         if event.mimeData().hasText() and event.mimeData().text().startswith("secs-message/"):
-            event.acceptProposedAction() # 드롭을 허용합니다.
+            event.acceptProposedAction()
 
     def dragMoveEvent(self, event):
-        """드래그된 아이템이 뷰 영역 안에서 움직일 때 호출됩니다."""
         if event.mimeData().hasText() and event.mimeData().text().startswith("secs-message/"):
             event.acceptProposedAction()
 
     def dropEvent(self, event):
-        """아이템이 최종적으로 드롭되었을 때 실행되는 로직입니다."""
+        """드롭 시 단순 QLabel 대신 ScenarioStepItem을 생성합니다."""
         mime_text = event.mimeData().text()
         if not mime_text.startswith("secs-message/"):
             return
 
-        # "secs-message/CV/S1F1_AreYouThere" 형식의 데이터를 파싱합니다.
-        parts = mime_text.split('/')
-        if len(parts) == 3:
-            device_type = parts[1]
-            message_id = parts[2]
-            
-            # 드롭된 위치에 시각적인 스텝 아이템(지금은 간단한 라벨)을 추가합니다.
-            step_label = QLabel(f"<b>{device_type}</b>: {message_id}")
-            step_label.setStyleSheet("background-color: #e8f4ff; border: 1px solid #007bff; padding: 10px; border-radius: 5px;")
-            
-            # QGraphicsScene은 위젯을 직접 담을 수 있으므로 addWidget을 사용합니다.
-            proxy_widget = self.scene.addWidget(step_label)
-            # 아이템들이 순서대로 쌓이도록 y 좌표를 조정합니다.
-            proxy_widget.setPos(10, self.y_pos_counter) 
-            self.y_pos_counter += proxy_widget.boundingRect().height() + 10
+        _, device_type, message_id = mime_text.split('/')
+        
+        # ScenarioManager를 통해 메시지의 전체 정보(body 등)를 가져옵니다.
+        # 이 get_message_body 메소드는 잠시 후에 ScenarioManager에 추가할 것입니다.
+        message_body = self.scenario_manager.get_message_body(device_type, message_id)
+        if not message_body:
+            print(f"Warning: Message body for {device_type}/{message_id} not found.")
+            return
 
-            event.acceptProposedAction()
+        # ScenarioStepItem이 가질 초기 데이터 모델을 생성합니다.
+        step_data = {
+            "device_id": "Select Device...", # 기본값
+            "delay": 0.0,
+            "message_id": message_id,
+            "message": message_body,
+            "device_type": device_type # PropertyEditor에서 사용될 정보
+        }
+        
+        # 데이터와 함께 똑똑한 아이템을 생성합니다.
+        item = ScenarioStepItem(step_data)
+        # 아이템이 클릭되면, step_selected 시그널을 통해 자신의 정보를 외부에 알립니다.
+        item.signals.selected.connect(self.step_selected.emit)
+        self.scene.addItem(item)
+        
+        item.setPos(10, self.y_pos_counter)
+        self.y_pos_counter += item.boundingRect().height() + 10
+
+        event.acceptProposedAction()
+

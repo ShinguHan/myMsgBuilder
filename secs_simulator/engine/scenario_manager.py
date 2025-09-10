@@ -14,6 +14,14 @@ class ScenarioManager:
         self._message_library_dir = Path(message_library_dir)
         self._message_libraries_cache: Dict[str, Any] = {}
 
+    def get_message_body(self, device_type: str, message_id: str) -> dict | None:
+        """
+        특정 메시지 라이브러리에서 메시지 본문(dict)을 직접 가져옵니다.
+        UI에서 드롭된 메시지의 상세 정보를 얻기 위해 사용됩니다.
+        """
+        library = self._load_message_library(device_type)
+        return library.get(message_id)
+
     def _load_message_library(self, device_type: str) -> Dict[str, Any]:
         """장비 타입에 맞는 메시지 라이브러리를 로드하고 캐싱합니다."""
         if device_type in self._message_libraries_cache:

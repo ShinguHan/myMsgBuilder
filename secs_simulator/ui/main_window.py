@@ -70,7 +70,11 @@ class MainWindow(QMainWindow):
         right_splitter = QWidget()
         right_layout = QVBoxLayout(right_splitter)
 
-        self.editor_widget = ScenarioEditorWidget() # 편집기 위젯 생성
+        # ✅ 생성자에 필요한 인자들을 전달합니다.
+        self.editor_widget = ScenarioEditorWidget(
+            self.scenario_manager,
+            self.orchestrator.get_device_configs()
+        )
         self.log_display = QTextEdit()
         self.log_display.setReadOnly(True)
 
