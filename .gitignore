@@ -13,3 +13,8 @@ pycache/
 build/
 dist/
 *.spec
+
+#pytest cov
+htmlcov/
+.coverage
+.pytest_cache/

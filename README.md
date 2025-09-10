@@ -9,3 +9,7 @@ SECS/GEM 시뮬레이터
 언어: Python 3.10+
 UI: PySide6
 비동기 처리: asyncio, qasync
+
+PYTEST
+pytest --cov=secs_simulator
+pytest --cov=secs_simulator --cov-report=html
