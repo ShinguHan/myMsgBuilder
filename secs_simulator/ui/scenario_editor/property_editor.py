@@ -77,14 +77,68 @@ class PropertyEditor(QWidget):
                     QTreeWidgetItem(parent_item, [item_type, str(item_value)])
 
     def _update_step_data(self):
-        """✅ 2. UI에서 값이 변경되면, 선택된 아이템의 데이터 모델을 업데이트합니다."""
+        """✅ UI에서 값이 변경되면, 선택된 아이템의 데이터 모델을 업데이트합니다."""
         if self._is_updating or not self.current_item:
             return
-            
-        # 3. 현재 UI의 값을 가져와서 선택된 아이템의 데이터(step_data)에 덮어씁니다.
+
+        # 1. Device ID와 Delay는 기존 방식대로 업데이트합니다.
         self.current_item.step_data['device_id'] = self.device_id_combo.currentText()
         self.current_item.step_data['delay'] = self.delay_spinbox.value()
-        
-        # 4. 데이터가 바뀌었으니, 타임라인의 아이템을 새로 그리라고 명령합니다.
+
+        # 2. ✨ [핵심] Message Body Tree의 현재 상태를 기반으로 message body 데이터를 재구성합니다.
+        new_body = self._rebuild_body_from_tree()
+        if new_body is not None:
+            self.current_item.step_data['message']['body'] = new_body
+
+        # 3. 데이터가 바뀌었으니, 타임라인의 아이템을 새로 그리라고 명령합니다.
         self.current_item.update()
+
+    def _rebuild_body_from_tree(self) -> list | None:
+        """
+        현재 message_body_tree 위젯의 상태를 읽어
+        SECS 메시지 body에 맞는 Python 리스트/딕셔너리 구조를 반환합니다.
+        (부록 A의 핵심 로직)
+        """
+        root = self.message_body_tree.invisibleRootItem()
+        if not root:
+            return None
+        
+        return self._recursive_tree_to_dict(root)
+
+    def _recursive_tree_to_dict(self, parent_item) -> list:
+        """QTreeWidgetItem을 재귀적으로 순회하며 데이터 리스트를 만듭니다."""
+        child_list = []
+        for i in range(parent_item.childCount()):
+            item = parent_item.child(i)
+            item_type_text = item.text(0)
+            item_value_text = item.text(1)
+            
+            new_item_data = {}
+
+            if item_type_text.startswith('L['): # 리스트 타입인 경우
+                new_item_data = {
+                    'type': 'L',
+                    'value': self._recursive_tree_to_dict(item) # ✨ 재귀 호출
+                }
+            else: # 그 외 타입 (A, U4 등)
+                item_type = item_type_text
+                value = self._convert_value_to_type(item_value_text, item_type)
+                new_item_data = {'type': item_type, 'value': value}
+            
+            child_list.append(new_item_data)
+        
+        return child_list
+
+    def _convert_value_to_type(self, value_str: str, target_type: str) -> any:
+        """문자열 값을 SECS 타입에 맞게 변환합니다. (부록 A-5 유효성 검사 참고)"""
+        try:
+            if target_type in ['A', 'B']:
+                return value_str
+            if target_type in ['U1', 'U2', 'U4', 'I1', 'I2', 'I4']:
+                return int(value_str)
+            if target_type in ['F4', 'F8']:
+                return float(value_str)
+            return value_str # 변환 실패 시 원본 문자열 반환
+        except (ValueError, TypeError):
+            return 0 # 숫자 변환 실패 시 0으로 초기화
 
