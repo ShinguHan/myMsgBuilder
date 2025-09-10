@@ -38,11 +38,6 @@ async def main():
 
     # ✅ 3. 메인 윈도우 생성 및 Orchestrator와 연결 (이 부분을 수정합니다)
     window = MainWindow(orchestrator)
-    
-    # get_device_configs()를 호출하여 전체 설정 '딕셔너리'를 가져옵니다.
-    device_configs_dict = orchestrator.get_device_configs()
-    window.populate_device_widgets(device_configs_dict) 
-    
     window.show()
 
     # qasync 이벤트 루프가 계속 실행되도록 Future를 반환

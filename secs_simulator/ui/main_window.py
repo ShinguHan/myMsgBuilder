@@ -1,10 +1,12 @@
-from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFileDialog,
                                QPushButton, QGridLayout, QTextEdit, QScrollArea)
 from PySide6.QtCore import Signal, Slot, QObject
 from typing import Dict
 
 from secs_simulator.engine.orchestrator import Orchestrator
 from secs_simulator.ui.device_status_widget import DeviceStatusWidget
+from secs_simulator.ui.scenario_editor_widget import ScenarioEditorWidget
+from secs_simulator.engine.scenario_manager import ScenarioManager # ScenarioManager 임포트
 import asyncio # 추가
 
 class MainWindow(QMainWindow):
@@ -17,6 +19,11 @@ class MainWindow(QMainWindow):
     def __init__(self, orchestrator: Orchestrator):
         super().__init__()
         self.orchestrator = orchestrator
+        # ✅ ScenarioManager 인스턴스 생성
+        self.scenario_manager = ScenarioManager(
+            device_configs=self.orchestrator.get_device_configs(),
+            message_library_dir='./resources/messages'
+        )
         self.device_widgets: Dict[str, DeviceStatusWidget] = {}
 
         self.setWindowTitle("SECS/HSMS Multi-Device Simulator")
@@ -26,6 +33,9 @@ class MainWindow(QMainWindow):
         self.agent_status_updated.connect(self.on_agent_status_update)
 
         self._init_ui()
+
+        # ✅ UI 초기화 후 라이브러리 로드
+        self.load_and_populate_libraries()
 
     def _init_ui(self):
         main_widget = QWidget()
@@ -56,17 +66,31 @@ class MainWindow(QMainWindow):
         scroll_area.setWidget(scroll_content)
         left_layout.addWidget(scroll_area)
         
-        # --- 오른쪽: 로그 및 시나리오 패널 (현재는 로그만) ---
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
+        # --- ✅ 오른쪽: 로그 패널을 시나리오 편집기로 교체 ---
+        right_splitter = QWidget()
+        right_layout = QVBoxLayout(right_splitter)
+
+        self.editor_widget = ScenarioEditorWidget() # 편집기 위젯 생성
         self.log_display = QTextEdit()
         self.log_display.setReadOnly(True)
+
+        # 편집기와 로그창을 위아래로 분할
+        editor_log_splitter = QVBoxLayout()
+        editor_log_splitter.addWidget(self.editor_widget, 3) # 편집기가 3의 비율
+        editor_log_splitter.addWidget(self.log_display, 1)   # 로그가 1의 비율
         
-        right_layout.addWidget(self.log_display)
-        # TODO: 향후 여기에 시나리오 실행 버튼 및 편집기가 추가될 예정
+        # 시나리오 제어 버튼 추가
+        scenario_control_layout = QHBoxLayout()
+        self.run_scenario_button = QPushButton("📂 Load & Run Scenario...")
+        self.run_scenario_button.clicked.connect(self.load_and_run_scenario)
+        scenario_control_layout.addWidget(self.run_scenario_button)
+        scenario_control_layout.addStretch()
+
+        right_layout.addLayout(editor_log_splitter)
+        right_layout.addLayout(scenario_control_layout)
 
         main_layout.addWidget(left_panel, 1)
-        main_layout.addWidget(right_panel, 2)
+        main_layout.addWidget(right_splitter, 3) # 비율 조정
 
     # ✅ 아래 메소드들을 클래스에 추가
     def start_agents(self):
@@ -112,3 +136,27 @@ class MainWindow(QMainWindow):
         
         if device_id in self.device_widgets:
             self.device_widgets[device_id].update_status(status, color)
+
+    # ✅ 아래 두 메소드를 클래스에 추가
+    def load_and_populate_libraries(self):
+        """ScenarioManager를 통해 라이브러리를 로드하고 UI에 채웁니다."""
+        all_libs = self.scenario_manager.get_all_message_libraries()
+        self.editor_widget.library_view.populate(all_libs)
+
+    def load_and_run_scenario(self):
+        """파일 대화상자를 열어 시나리오를 선택하고 실행합니다."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Load Master Scenario", "./resources/scenarios", "JSON Files (*.json)"
+        )
+        if not file_path:
+            return
+
+        self.log_display.append(f"--- Loading scenario: {file_path} ---")
+        scenario_data = self.scenario_manager.prepare_scenario(file_path)
+
+        if scenario_data:
+            self.log_display.append(f"--- Running scenario '{scenario_data.get('name', '')}' ---")
+            self.orchestrator.run_scenario(scenario_data)
+        else:
+            self.log_display.append("--- Failed to load or prepare scenario. ---")
+            
