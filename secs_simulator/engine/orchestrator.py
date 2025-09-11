@@ -1,6 +1,6 @@
 import asyncio
 import json
-from typing import Callable, Awaitable, Dict, Any, List
+from typing import Callable, Awaitable, Dict, Any
 
 from secs_simulator.engine.device_agent import DeviceAgent
 
@@ -9,7 +9,7 @@ class Orchestrator:
     여러 DeviceAgent를 관리하고 시나리오에 따라 제어하는 지휘자 클래스.
     """
 
-    def __init__(self, status_callback: Callable[[str, str], Awaitable]):
+    def __init__(self, status_callback: Callable[[str, str, str], Awaitable]):
         """
         Args:
             status_callback (Callable): UI로 에이전트의 상태를 전달하기 위한 비동기 콜백.
@@ -33,7 +33,6 @@ class Orchestrator:
                     device_id=device_id,
                     host=settings['host'],
                     port=settings['port'],
-                    # ✅ [버그 수정] status_callback이 3개의 인자를 모두 전달하도록 수정
                     status_callback=self._status_callback
                 )
                 self._agents[device_id] = agent
@@ -84,11 +83,36 @@ class Orchestrator:
 
                 device_id = step.get('device_id')
                 target_agent = self._agents.get(device_id)
-                if not target_agent:
-                    print(f"Scenario Warning: Device '{device_id}' not found.")
-                    continue
 
+                if 'wait_recv' in step:
+                    if not target_agent:
+                        print(f"Scenario Warning: Device '{device_id}' not found for wait_recv.")
+                        continue
+                    
+                    match_criteria = step['wait_recv']
+                    s = match_criteria.get('s')
+                    f = match_criteria.get('f')
+                    timeout = step.get('timeout', 10.0)
+
+                    if s is not None and f is not None:
+                        status_msg = f"Waiting for S{s}F{f} from {device_id}..."
+                        print(status_msg)
+                        await self._status_callback("Orchestrator", status_msg, "blue")
+                        
+                        result = await target_agent.wait_for_message(s, f, timeout)
+                        if result is None:
+                            error_msg = f"Scenario FAIL: Timed out waiting for S{s}F{f} from {device_id}"
+                            print(error_msg)
+                            await self._status_callback("Orchestrator", error_msg, "red")
+                            break
+                    else:
+                        print(f"Scenario Warning: Invalid 'wait_recv' criteria for device '{device_id}'.")
+                
                 if 'message' in step:
+                    if not target_agent:
+                        print(f"Scenario Warning: Device '{device_id}' not found for send message.")
+                        continue
+
                     message = step['message']
                     await target_agent.send_message(
                         s=message.get('s', 0),
@@ -121,4 +145,3 @@ class Orchestrator:
             body=message.get('body')
         ))
         print(f"Manually sent message to {device_id}: S{message.get('s')}F{message.get('f')}")
-

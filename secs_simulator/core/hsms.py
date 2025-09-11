@@ -1,7 +1,7 @@
 import asyncio
 import struct
 from enum import IntEnum
-from typing import Optional
+from typing import Optional, Callable, Awaitable
 
 from .secs_parser import parse_body
 from .secs_builder import build_secs_body
@@ -21,15 +21,15 @@ class HsmsMessageType(IntEnum):
 class HsmsConnection:
     """Manages the lifecycle and communication for a single HSMS connection."""
 
-    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, message_callback: Callable[[dict], Awaitable]):
         self.reader = reader
         self.writer = writer
         self.peername = writer.get_extra_info('peername')
         self.is_selected = False
         self._system_bytes_counter = 0
+        self._message_callback = message_callback
         print(f"HSMS: New connection from {self.peername}")
 
-    # ✅ 누락되었던 함수를 다시 추가했습니다.
     def get_next_system_bytes(self) -> int:
         """다음에 사용할 System Bytes 값을 반환하고 카운터를 1 증가시킵니다."""
         self._system_bytes_counter += 1
@@ -78,7 +78,6 @@ class HsmsConnection:
 
         handler = handler_map.get(msg_type)
         if handler:
-            # 모든 핸들러가 동일한 인자를 받도록 body를 전달합니다.
             await handler(s, f, w_bit, system_bytes, body)
         else:
             print(f"HSMS: No handler for message type {msg_type.name}")
@@ -102,12 +101,16 @@ class HsmsConnection:
             await self.writer.wait_closed()
 
     async def _handle_data_message(self, s: int, f: int, w: bool, system_bytes: int, body: bytes) -> None:
-        """Handles an incoming data message."""
-        parsed = parse_body(body)
-        print(f"HSMS: Parsed data message body: {parsed}")
+        """Handles an incoming data message and passes it to the agent."""
+        parsed_body = parse_body(body)
         
-        if s == 1 and f == 13: # S1F13 (Establish Communications Request)에 대한 응답 예시
-             await self.send_secs_message(1, 14, system_bytes, body_obj=[{'type': 'B', 'value': 0}])
+        message = {
+            's': s, 'f': f, 'w_bit': w,
+            'system_bytes': system_bytes,
+            'body': parsed_body
+        }
+        print(f"HSMS: Parsed data message, forwarding to agent: S{s}F{f}")
+        await self._message_callback(message)
 
     async def send_secs_message(self, s: int, f: int, system_bytes: int, body_obj: Optional[list] = None) -> None:
         """Constructs and sends a SECS-II data message."""
