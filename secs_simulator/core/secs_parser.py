@@ -10,7 +10,11 @@ def parse_body(body_bytes: bytes) -> List[SecsItem]:
     This is the public entry point for the parser.
     """
     body_io = io.BytesIO(body_bytes)
-    return _parse_body_recursive(body_io)
+    items: List[SecsItem] = []
+    # ✅ [개선] 메시지 바디 전체를 파싱할 때까지 아이템을 순차적으로 읽도록 루프를 추가합니다.
+    while body_io.tell() < len(body_bytes):
+        items.extend(_parse_body_recursive(body_io))
+    return items
 
 def _parse_body_recursive(body_io: io.BytesIO) -> List[SecsItem]:
     """
@@ -34,10 +38,9 @@ def _parse_body_recursive(body_io: io.BytesIO) -> List[SecsItem]:
         item_type = "Unknown"
         value = None
 
-        # A mapping from format code to (type_str, value_parser_lambda)
-        # This approach is more scalable and readable than a large if/elif/else block.
         type_map = {
-            0b000000: ('L', lambda: [_parse_body_recursive(body_io) for _ in range(length)]),
+            # ✅ [개선] L타입 파싱 시 재귀 호출 결과를 바로 리스트로 만들어 중첩 구조를 보존합니다.
+            0b000000: ('L', lambda: [item for _ in range(length) for item in _parse_body_recursive(body_io)]),
             0b010000: ('A', lambda: body_io.read(length).decode('ascii', errors='replace')),
             0b001000: ('B', lambda: body_io.read(length)),
             0b001001: ('BOOL', lambda: [struct.unpack('>?', body_io.read(1))[0] for _ in range(length)]),
@@ -55,24 +58,16 @@ def _parse_body_recursive(body_io: io.BytesIO) -> List[SecsItem]:
             item_type, parser = type_map[data_format_code]
             parsed_value = parser()
             
-            # Flatten nested lists for 'L' type
-            if item_type == 'L':
-                value = [item for sublist in parsed_value for item in sublist]
-            # Simplify single-item arrays to a single value
-            elif isinstance(parsed_value, list) and len(parsed_value) == 1:
-                value = parsed_value[0]
-            else:
-                value = parsed_value
+            # ✅ [개선] L타입에 대한 별도 처리 및 단일 아이템 리스트 단순화 로직을 제거하여
+            # 모든 데이터 구조가 원본 그대로 유지되도록 합니다.
+            value = parsed_value
         else:
-            # Skip unhandled types to allow parsing of the rest of the message
             body_io.read(length)
 
         if value is not None:
             items.append(SecsItem(type=item_type, value=value))
 
     except (IndexError, struct.error) as e:
-        # Gracefully handle malformed data without crashing.
         print(f"Parsing warning: Encountered malformed data. {e}")
     
     return items
-

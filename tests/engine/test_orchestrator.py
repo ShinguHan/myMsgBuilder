@@ -1,92 +1,83 @@
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
 from secs_simulator.engine.orchestrator import Orchestrator
+from secs_simulator.engine.scenario_manager import ScenarioManager
 import asyncio
 
-
-# 이 파일의 모든 테스트를 pytest-asyncio가 비동기 모드로 실행하도록 설정합니다.
 pytestmark = pytest.mark.asyncio
-
 
 @pytest.fixture
 def mock_device_agents():
-    """
-    Orchestrator가 사용할 가짜 DeviceAgent 클래스와 인턴스들을 생성하는 Fixture.
-    테스트 실행 전에 미리 준비되어 테스트 함수에 '주입'됩니다.
-    """
-    # DeviceAgent 클래스 자체를 모킹합니다.
-    # 이제 'DeviceAgent(...)'를 호출하면 실제 클래스 대신 이 Mock이 사용됩니다.
+    """Orchestrator가 사용할 가짜 DeviceAgent 클래스와 인스턴스들을 생성하는 Fixture."""
     with patch('secs_simulator.engine.orchestrator.DeviceAgent', new_callable=MagicMock) as MockAgentClass:
-        # 가짜 Agent 인스턴스들을 미리 만들어 둡니다.
         mock_cv01 = AsyncMock()
         mock_stk01 = AsyncMock()
 
-        # Orchestrator가 'CV_01'을 찾을 때와 'STK_01'을 찾을 때
-        # 각각 다른 가짜 인스턴스를 반환하도록 설정합니다.
-        # side_effect는 호출될 때마다 다른 결과를 내도록 할 수 있습니다.
         def agent_factory(device_id, *args, **kwargs):
-            if device_id == "CV_01":
-                return mock_cv01
-            elif device_id == "STK_01":
-                return mock_stk01
+            if device_id == "CV_01": return mock_cv01
+            elif device_id == "STK_01": return mock_stk01
             return AsyncMock()
 
         MockAgentClass.side_effect = agent_factory
+        yield {"CV_01": mock_cv01, "STK_01": mock_stk01}
 
-        # 테스트 코드에서 검증을 위해 가짜 인스턴스들에 접근할 수 있도록 딕셔너리를 반환합니다.
-        yield {
-            "CV_01": mock_cv01,
-            "STK_01": mock_stk01
-        }
+# ✅ [개선] ScenarioManager를 테스트에서 사용할 수 있도록 Fixture를 추가합니다.
+@pytest.fixture
+def scenario_manager():
+    """테스트용 ScenarioManager 인스턴스를 제공합니다."""
+    device_configs = {
+        "CV_01": {"host": "127.0.0.1", "port": 5001, "type": "CV"},
+        "STK_01": {"host": "127.0.0.1", "port": 5002, "type": "Stocker"}
+    }
+    return ScenarioManager(device_configs=device_configs, message_library_dir='./resources/messages')
 
-
-async def test_orchestrator_runs_simple_scenario(mock_device_agents):
+# ✅ [개선] 테스트 케이스를 실제 앱의 데이터 흐름과 유사하게 수정합니다.
+async def test_orchestrator_runs_scenario_realistically(mock_device_agents, scenario_manager):
     """
-    Orchestrator가 간단한 시나리오를 읽고,
-    올바른 순서로 Agent들의 메소드를 호출하는지 테스트합니다.
+    Orchestrator가 message_id 기반 시나리오를 message body로 변환하여
+    올바르게 실행하는지 통합적으로 테스트합니다.
     """
-    # 1. 테스트용 시나리오 정의 (Orchestrator의 실제 동작에 맞게 수정)
-    scenario_data = {
-        'name': 'Simple Test',
+    # 1. 실제 시나리오 파일처럼 'message_id'를 사용하여 시나리오를 정의합니다.
+    raw_scenario = {
+        'name': 'Realistic Test',
         'steps': [
-            {
-                'device_id': 'CV_01',
-                'message': {'s': 1, 'f': 13, 'body': ['A', 'TEST']}
-            },
-            {
-                # 'delay_after_ms' -> 'delay', 100ms -> 0.1s
-                'delay': 0.1
-            },
-            {
-                'device_id': 'STK_01',
-                'message': {'s': 2, 'f': 1, 'body': []}
-            }
+            {'device_id': 'CV_01', 'message_id': 'S2F41_HostCommand_START', 'delay': 0},
+            {'delay': 0.1},
+            {'device_id': 'STK_01', 'message_id': 'S5F1_AlarmReport', 'delay': 0}
         ]
     }
 
-    # 2. Orchestrator 생성 및 시나리오 실행
-    # status_callback은 이 테스트의 관심사가 아니므로 가짜(AsyncMock)로 넘겨줍니다.
+    # 2. ScenarioManager를 사용해 시나리오를 Orchestrator가 실행할 수 있는 형태로 가공합니다.
+    processed_steps = []
+    for step in raw_scenario['steps']:
+        if 'message_id' in step:
+            dev_type = scenario_manager.get_device_type(step['device_id'])
+            msg_body = scenario_manager.get_message_body(dev_type, step['message_id'])
+            processed_steps.append({
+                "device_id": step['device_id'],
+                "message": msg_body,
+                "delay": step.get('delay', 0)
+            })
+        else:
+            processed_steps.append(step)
+    executable_scenario = {"name": raw_scenario['name'], "steps": processed_steps}
+
+    # 3. Orchestrator를 생성하고 가공된 시나리오를 실행합니다.
     orchestrator = Orchestrator(status_callback=AsyncMock())
-    # patch된 load_device_configs를 모의 호출하기 위해 빈 설정을 로드합니다.
-    orchestrator._agents = { "CV_01": mock_device_agents["CV_01"], "STK_01": mock_device_agents["STK_01"] }
+    orchestrator._agents = mock_device_agents
+    orchestrator.run_scenario(executable_scenario)
+    await asyncio.sleep(0.2)
 
-    orchestrator.run_scenario(scenario_data)
-
-    # run_scenario는 백그라운드 태스크를 생성하므로, 완료될 때까지 잠시 기다려줍니다.
-    await asyncio.sleep(0.2) # 시나리오의 delay(0.1s)보다 긴 시간
-
-    # 3. 검증
+    # 4. 각 Agent의 send_message가 올바른 메시지 본문과 함께 호출되었는지 검증합니다.
     cv_agent = mock_device_agents['CV_01']
     stk_agent = mock_device_agents['STK_01']
 
-    # CV_01의 send_message가 올바른 인자와 함께 호출되었는지 확인
-    # w_bit 제거, body_obj -> body로 수정
+    expected_cv_msg = scenario_manager.get_message_body("CV", "S2F41_HostCommand_START")
     cv_agent.send_message.assert_awaited_once_with(
-        s=1, f=13, body=['A', 'TEST']
+        s=expected_cv_msg['s'], f=expected_cv_msg['f'], body=expected_cv_msg['body']
     )
 
-    # STK_01의 send_message가 올바른 인자와 함께 호출되었는지 확인
-    # w_bit 제거, body_obj -> body로 수정
+    expected_stk_msg = scenario_manager.get_message_body("Stocker", "S5F1_AlarmReport")
     stk_agent.send_message.assert_awaited_once_with(
-        s=2, f=1, body=[]
+        s=expected_stk_msg['s'], f=expected_stk_msg['f'], body=expected_stk_msg['body']
     )
