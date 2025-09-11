@@ -92,3 +92,48 @@ QHeaderView::section {
     padding: 4px;
     font-weight: 600;
 }
+
+/* ===== Device Status Card ===== */
+#statusCard {
+    background-color: #3C3C3C;
+    border: 1px solid #2D2D2D;
+    border-radius: 8px;
+    min-height: 90px;
+    max-height: 90px;
+}
+
+#statusCard:hover {
+    border: 1px solid #5A5A5A;
+}
+
+#deviceTitle {
+    font-size: 18px;
+    font-weight: 600;
+    color: #E0E0E0;
+}
+
+#addressLabel {
+    color: #888888;
+    font-size: 12px;
+}
+
+#cardSeparator {
+    background-color: #4A4A4A;
+    border: none;
+    height: 1px;
+}
+
+#statusIndicator {
+    min-width: 12px;
+    max-width: 12px;
+    min-height: 12px;
+    max-height: 12px;
+    border-radius: 6px;
+    border: 1px solid rgba(0, 0, 0, 0.2);
+}
+
+#statusLabel {
+    color: #AAAAAA;
+    font-size: 13px;
+    padding-left: 8px;
+}

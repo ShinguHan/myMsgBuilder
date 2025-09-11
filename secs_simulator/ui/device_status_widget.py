@@ -8,44 +8,52 @@ class DeviceStatusWidget(QFrame):
         super().__init__(parent)
         self.device_id = device_id
         
-        self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setObjectName("statusCard")
-        # 간단한 스타일링 추가
-        self.setStyleSheet("""
-            #statusCard {
-                background-color: #f8f9fa;
-                border: 1px solid #dee2e6;
-                border-radius: 8px;
-                padding: 10px;
-            }
-        """)
 
-        layout = QVBoxLayout(self)
-        
-        title_label = QLabel(f"<b>{device_id}</b>")
-        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title_label)
-        
-        info_layout = QHBoxLayout()
-        self.status_indicator = QLabel()
-        self.status_indicator.setFixedSize(16, 16)
-        
-        self.status_label = QLabel("Stopped")
-        self.status_label.setWordWrap(True)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(12, 8, 12, 8)
+        main_layout.setSpacing(0)
 
-        info_layout.addWidget(self.status_indicator)
-        info_layout.addWidget(self.status_label, 1)
-        layout.addLayout(info_layout)
+        # --- 상단 (제목 & 주소) ---
+        top_layout = QHBoxLayout()
+        top_layout.setContentsMargins(0, 0, 0, 4)
+        title_label = QLabel(device_id)
+        title_label.setObjectName("deviceTitle")
         
         address_label = QLabel(f"{host}:{port}")
-        address_label.setStyleSheet("color: #6c757d; font-size: 9pt;")
-        layout.addWidget(address_label)
+        address_label.setObjectName("addressLabel")
+        address_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+        top_layout.addWidget(title_label)
+        top_layout.addWidget(address_label)
+        main_layout.addLayout(top_layout)
+
+        # --- 구분선 ---
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setFrameShadow(QFrame.Shadow.Sunken)
+        line.setObjectName("cardSeparator")
+        main_layout.addWidget(line)
+
+        main_layout.addStretch(1)
+
+        # --- 하단 (상태) ---
+        status_layout = QHBoxLayout()
+        status_layout.setContentsMargins(0, 4, 0, 0)
+        self.status_indicator = QLabel()
+        self.status_indicator.setObjectName("statusIndicator")
+
+        self.status_label = QLabel("Stopped")
+        self.status_label.setObjectName("statusLabel")
+        self.status_label.setWordWrap(True)
+
+        status_layout.addWidget(self.status_indicator)
+        status_layout.addWidget(self.status_label, 1)
+        main_layout.addLayout(status_layout)
         
-        self.update_status("Stopped", "gray")
+        self.update_status("Stopped", "#555555")
 
     def update_status(self, status: str, color: str):
         """위젯의 텍스트와 상태 표시등 색상을 업데이트합니다."""
         self.status_label.setText(status)
-        self.status_indicator.setStyleSheet(
-            f"background-color: {color}; border-radius: 8px; border: 1px solid #adb5bd;"
-        )
+        self.status_indicator.setStyleSheet(f"background-color: {color};")
