@@ -1,19 +1,21 @@
-from PySide6.QtWidgets import QGraphicsView, QGraphicsScene
-from PySide6.QtCore import Signal, Qt
+# secs_simulator/ui/scenario_editor/scenario_timeline_view.py
 
-# 방금 만든 ScenarioStepItem을 임포트합니다.
+from PySide6.QtWidgets import QGraphicsView, QGraphicsScene
+from PySide6.QtCore import Signal, Slot
+
 from .scenario_step_item import ScenarioStepItem
 
 class ScenarioTimelineView(QGraphicsView):
     """
-    드래그된 메시지를 드롭하여 ScenarioStepItem을 생성하는 뷰입니다.
+    드래그된 메시지를 드롭하여 ScenarioStepItem을 생성하고,
+    선택된 아이템의 정보를 외부로 전달하는 뷰입니다.
     """
-    # 선택된 스텝 아이템의 정보를 외부(PropertyEditor)로 전달하기 위한 시그널
-    step_selected = Signal(object) 
+    # ✅ [핵심 수정] object 대신 명확한 타입의 시그널을 정의합니다.
+    step_selected = Signal(ScenarioStepItem) 
 
     def __init__(self, scenario_manager, parent=None):
         super().__init__(parent)
-        self.scenario_manager = scenario_manager # 메시지 정보를 가져오기 위해 필요
+        self.scenario_manager = scenario_manager
         self.scene = QGraphicsScene(self)
         self.setScene(self.scene)
         self.setAcceptDrops(True)
@@ -35,30 +37,25 @@ class ScenarioTimelineView(QGraphicsView):
 
         _, device_type, message_id = mime_text.split('/')
         
-        # ScenarioManager를 통해 메시지의 전체 정보(body 등)를 가져옵니다.
-        # 이 get_message_body 메소드는 잠시 후에 ScenarioManager에 추가할 것입니다.
         message_body = self.scenario_manager.get_message_body(device_type, message_id)
         if not message_body:
             print(f"Warning: Message body for {device_type}/{message_id} not found.")
             return
 
-        # ScenarioStepItem이 가질 초기 데이터 모델을 생성합니다.
         step_data = {
-            "device_id": "Select Device...", # 기본값
+            "device_id": "Select Device...",
             "delay": 0.0,
             "message_id": message_id,
             "message": message_body,
-            "device_type": device_type # PropertyEditor에서 사용될 정보
+            "device_type": device_type
         }
         
-        # 데이터와 함께 똑똑한 아이템을 생성합니다.
         item = ScenarioStepItem(step_data)
-        # 아이템이 클릭되면, step_selected 시그널을 통해 자신의 정보를 외부에 알립니다.
+        # 아이템 내부의 'selected' 신호가 발생하면, 이 클래스의 'step_selected' 신호를 발생시킵니다.
         item.signals.selected.connect(self.step_selected.emit)
-        self.scene.addItem(item)
         
+        self.scene.addItem(item)
         item.setPos(10, self.y_pos_counter)
         self.y_pos_counter += item.boundingRect().height() + 10
 
         event.acceptProposedAction()
-
