@@ -91,6 +91,12 @@ class HsmsConnection:
         body_bytes = build_secs_body(body_obj or [])
         await self.send_hsms_message(HsmsMessageType.DATA_MESSAGE, system_bytes, s, f, body=body_bytes)
 
+    # ✅ [버그 수정] System Bytes 카운터를 관리하는 메서드 추가
+    def get_next_system_bytes(self) -> int:
+        """다음에 사용할 System Bytes 값을 반환하고 카운터를 1 증가시킵니다."""
+        self._system_bytes_counter += 1
+        return self._system_bytes_counter
+
     async def send_hsms_message(
         self, msg_type: HsmsMessageType, system_bytes: int, 
         s: int = 0, f: int = 0, w_bit: bool = False, body: bytes = b''

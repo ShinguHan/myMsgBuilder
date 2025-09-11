@@ -33,7 +33,8 @@ class Orchestrator:
                     device_id=device_id,
                     host=settings['host'],
                     port=settings['port'],
-                    status_callback=lambda dev_id, status: self._status_callback(dev_id, status, "default")
+                    # ✅ [버그 수정] status_callback이 3개의 인자를 모두 전달하도록 수정
+                    status_callback=self._status_callback
                 )
                 self._agents[device_id] = agent
             

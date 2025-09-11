@@ -1,0 +1,40 @@
+{
+    "name": "VisualEditorScenario",
+    "steps": [
+        {
+            "device_id": "CV_01",
+            "delay": 0.0,
+            "message_id": "S1F1_AreYouThere"
+        },
+        {
+            "device_id": "CV_01",
+            "delay": 0.0,
+            "message_id": "S2F41_HostCommand_START"
+        },
+        {
+            "device_id": "CV_01",
+            "delay": 0.0,
+            "message_id": "S1F1_AreYouThere"
+        },
+        {
+            "device_id": "Select Device...",
+            "delay": 0.0,
+            "message_id": "S1F1_AreYouThere"
+        },
+        {
+            "device_id": "Select Device...",
+            "delay": 0.0,
+            "message_id": "S5F1_AlarmReport"
+        },
+        {
+            "device_id": "Select Device...",
+            "delay": 0.0,
+            "message_id": "S2F41_HostCommand_START"
+        },
+        {
+            "device_id": "Select Device...",
+            "delay": 0.0,
+            "message_id": "S1F1_AreYouThere"
+        }
+    ]
+}

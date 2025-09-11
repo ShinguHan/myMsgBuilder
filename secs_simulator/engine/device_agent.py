@@ -9,7 +9,8 @@ class DeviceAgent:
     자체 HSMS 서버를 구동하며 외부 명령에 따라 동작합니다.
     """
 
-    def __init__(self, device_id: str, host: str, port: int, status_callback: Callable[[str, str], Awaitable]):
+    # ✅ [버그 수정] status_callback의 타입 힌트를 3개의 인자를 받도록 수정합니다.
+    def __init__(self, device_id: str, host: str, port: int, status_callback: Callable[[str, str, str], Awaitable]):
         """
         Args:
             device_id (str): 이 장비의 고유 ID (e.g., "CV_01")
@@ -37,7 +38,6 @@ class DeviceAgent:
             self._server = await asyncio.start_server(
                 self._on_client_connected, self.host, self.port
             )
-            # 서버 시작과 명령 처리를 하나의 메인 태스크로 묶어 관리합니다.
             self._main_task = asyncio.create_task(self._command_processor())
             await self._update_status(f"Listening on {self.host}:{self.port}")
         except OSError as e:
@@ -74,34 +74,41 @@ class DeviceAgent:
         await self._command_queue.put(command)
 
     async def _update_status(self, status: str) -> None:
-        """상태 변경을 상위 관리자에게 비동기적으로 보고합니다."""
-        await self.status_callback(self.device_id, status)
+        """상태 변경을 상위 관리자에게 비동기적으로 보고하고, 상태에 따라 색상을 결정합니다."""
+        # ✅ [버그 수정] 상태 메시지에 따라 색상을 결정하는 로직을 추가합니다.
+        color = "gray"
+        if "Listening" in status:
+            color = "orange"
+        elif "Connected" in status or "Sent" in status:
+            color = "green"
+        elif "Error" in status:
+            color = "red"
+        
+        # ✅ [버그 수정] 콜백에 device_id, status, color 3개의 인자를 모두 전달합니다.
+        await self.status_callback(self.device_id, status, color)
 
     async def _on_client_connected(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         """Host가 접속했을 때 호출되는 콜백 함수."""
         await self._update_status("Host Connected")
         self._connection = HsmsConnection(reader, writer)
         try:
-            # HsmsConnection의 handle_connection을 실행하여 메시지 수신/처리를 시작합니다.
             await self._connection.handle_connection()
         finally:
             self._connection = None
-            # 연결이 끊어지면 다시 Listening 상태로 돌아갑니다.
             await self._update_status(f"Listening on {self.host}:{self.port}")
 
     async def _command_processor(self) -> None:
         """
         명령 큐를 감시하고 명령을 처리하는 메인 루프.
-        asyncio.Queue를 사용하여 외부의 요청과 실제 메시지 전송 로직을 분리합니다.
         """
         while True:
+            command = None
             try:
                 command = await self._command_queue.get()
                 
                 if command['action'] == 'send':
                     if self._connection and self._connection.is_selected:
-                        # TODO: System Bytes는 실제 Transaction과 연동되어야 함. 현재는 임시값.
-                        temp_system_bytes = self._connection._get_next_system_bytes()
+                        temp_system_bytes = self._connection.get_next_system_bytes()
                         await self._connection.send_secs_message(
                             s=command['s'],
                             f=command['f'],
@@ -111,9 +118,10 @@ class DeviceAgent:
                         await self._update_status(f"Sent S{command['s']}F{command['f']}")
                     else:
                         await self._update_status("Cannot send: Not connected or not selected.")
-                
-                self._command_queue.task_done()
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 await self._update_status(f"Error in command processor: {e}")
+            finally:
+                if command:
+                    self._command_queue.task_done()
