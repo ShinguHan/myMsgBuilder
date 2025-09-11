@@ -1,10 +1,12 @@
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QFormLayout, 
                                QComboBox, QDoubleSpinBox, QTreeWidget, QTreeWidgetItem,
-                               QPushButton)
+                               QPushButton, QMenu, QInputDialog, QMessageBox)
 from PySide6.QtCore import Slot, Qt, Signal
+from PySide6.QtGui import QAction
 
 from .scenario_step_item import ScenarioStepItem
 from secs_simulator.engine.scenario_manager import ScenarioManager
+import copy
 
 class PropertyEditor(QWidget):
     """스텝 편집 및 수동 메시지 전송을 위한 속성 편집기입니다."""
@@ -40,14 +42,19 @@ class PropertyEditor(QWidget):
         layout.addStretch()
         layout.addWidget(self.send_now_button)
 
+        # --- Signal Connections ---
         self.device_id_combo.currentTextChanged.connect(self.on_device_id_changed)
         self.delay_spinbox.valueChanged.connect(self.on_delay_changed)
         self.send_now_button.clicked.connect(self.on_send_now_clicked)
-        # ✅ [핵심 기능] Tree 아이템의 값이 변경되었을 때 호출될 슬롯 연결
         self.message_body_tree.itemChanged.connect(self.on_message_body_item_changed)
+
+        # ✅ [기능 추가] 우클릭 컨텍스트 메뉴를 위한 설정
+        self.message_body_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.message_body_tree.customContextMenuRequested.connect(self._show_context_menu)
         
         self.clear_view()
 
+    # --- UI Mode Control ---
     def clear_view(self):
         """뷰를 초기 상태로 리셋합니다."""
         self._is_internal_update = True
@@ -68,28 +75,10 @@ class PropertyEditor(QWidget):
         self.current_item = item
         self.current_manual_message = None
         data = item.step_data
-
         self.form_layout.labelForField(self.delay_spinbox).show()
         self.delay_spinbox.show()
         self.send_now_button.hide()
-
-        device_type = data.get("device_type")
-        self.device_id_combo.clear()
-        available_devices = [dev_id for dev_id, conf in self.device_configs.items() if conf.get('type') == device_type]
-        self.device_id_combo.addItems(available_devices)
-        self.device_id_combo.setCurrentText(data.get("device_id"))
-        
-        self.delay_spinbox.setValue(data.get("delay", 0))
-
-        initial_device_id = self.device_id_combo.currentText()
-        if data['device_id'] != initial_device_id:
-            data['device_id'] = initial_device_id
-            self.current_item.update()
-
-        self.message_body_tree.clear()
-        if "message" in data and "body" in data["message"]:
-            self._populate_message_tree(self.message_body_tree, data["message"]["body"])
-        self.message_body_tree.expandAll()
+        self._populate_common_fields(data)
         self._is_internal_update = False
 
     @Slot(dict)
@@ -97,20 +86,43 @@ class PropertyEditor(QWidget):
         """수동 메시지 전송 모드로 UI를 설정합니다."""
         self._is_internal_update = True
         self.current_item = None
-        self.current_manual_message = message_data.get("message")
-
+        # ✅ 수동 전송 시 원본 라이브러리 메시지가 수정되지 않도록 깊은 복사 사용
+        self.current_manual_message = copy.deepcopy(message_data.get("message"))
         self.form_layout.labelForField(self.delay_spinbox).hide()
         self.delay_spinbox.hide()
         self.send_now_button.show()
-
-        device_type = message_data.get("device_type")
+        self._populate_common_fields(message_data)
+        self._is_internal_update = False
+    
+    def _populate_common_fields(self, data_source: dict):
+        """두 모드에서 공통적으로 사용되는 UI 필드를 채웁니다."""
+        device_type = data_source.get("device_type")
         self.device_id_combo.clear()
         available_devices = [dev_id for dev_id, conf in self.device_configs.items() if conf.get('type') == device_type]
         self.device_id_combo.addItems(available_devices)
+        if isinstance(data_source, dict) and data_source.get("device_id"):
+             self.device_id_combo.setCurrentText(data_source.get("device_id"))
+        
+        self.delay_spinbox.setValue(data_source.get("delay", 0))
 
+        message_body = self._get_current_message_body()
+        self._refresh_ui_from_model(message_body)
+    
+    # --- Data Model & UI Synchronization ---
+    def _get_current_message_body(self) -> list | None:
+        """현재 편집 대상(스텝 또는 수동 메시지)의 body 리스트를 반환합니다."""
+        if self.current_item:
+            return self.current_item.step_data.get("message", {}).get("body")
+        if self.current_manual_message:
+            return self.current_manual_message.get("body")
+        return None
+
+    def _refresh_ui_from_model(self, message_body: list | None):
+        """주어진 데이터 모델을 기반으로 Tree View 전체를 다시 그립니다."""
+        self._is_internal_update = True
         self.message_body_tree.clear()
-        if "body" in self.current_manual_message:
-             self._populate_message_tree(self.message_body_tree, self.current_manual_message["body"])
+        if message_body is not None:
+            self._populate_message_tree(self.message_body_tree, message_body)
         self.message_body_tree.expandAll()
         self._is_internal_update = False
 
@@ -119,55 +131,110 @@ class PropertyEditor(QWidget):
         for item_data in data_list:
             item_type, val = item_data.get('type'), item_data.get('value')
             tree_item = QTreeWidgetItem(parent_widget)
-            
-            # ✅ [핵심 기능] 각 Tree 아이템에 실제 데이터(dict)를 저장합니다.
             tree_item.setData(0, Qt.ItemDataRole.UserRole, item_data)
-
             if item_type == 'L':
                 tree_item.setText(0, f"L[{len(val)}]")
                 self._populate_message_tree(tree_item, val)
             else:
                 tree_item.setText(0, item_type)
                 tree_item.setText(1, str(val))
-                # ✅ L 타입이 아닌 경우에만 값(Value) 컬럼을 편집 가능하도록 설정
                 tree_item.setFlags(tree_item.flags() | Qt.ItemIsEditable)
 
+    # --- Context Menu Actions ---
+    @Slot(object)
+    def _show_context_menu(self, position):
+        """Tree 위젯에서 우클릭 시 컨텍스트 메뉴를 표시합니다."""
+        selected_item = self.message_body_tree.currentItem()
+        if not selected_item: return
+
+        menu = QMenu()
+        # 'L' 타입이거나, 부모가 'L' 타입인 경우에만 아이템 추가/삭제 가능
+        can_add = selected_item.data(0, Qt.ItemDataRole.UserRole).get('type') == 'L'
+        can_remove = selected_item.parent() is not None
+
+        if can_add:
+            add_action = menu.addAction("Add New Item")
+            add_action.triggered.connect(lambda: self._add_item_action(selected_item))
+        
+        if can_remove:
+            remove_action = menu.addAction("Remove Selected Item")
+            remove_action.triggered.connect(lambda: self._remove_item_action(selected_item))
+        
+        change_type_action = menu.addAction("Change Type")
+        change_type_action.triggered.connect(lambda: self._change_type_action(selected_item))
+        
+        menu.exec(self.message_body_tree.mapToGlobal(position))
+
+    def _add_item_action(self, selected_item: QTreeWidgetItem):
+        """'아이템 추가' 액션을 처리합니다."""
+        item_data = selected_item.data(0, Qt.ItemDataRole.UserRole)
+        if item_data.get('type') != 'L': return
+
+        SECS_TYPES = ['L', 'A', 'B', 'U1', 'U2', 'U4', 'I1', 'I2', 'I4', 'F4', 'F8', 'BOOL']
+        item_type, ok = QInputDialog.getItem(self, "Add SECS Item", "Select item type:", SECS_TYPES, 0, False)
+        if not ok: return
+
+        new_item_data = {'type': item_type, 'value': [] if item_type == 'L' else 0 if item_type != 'A' else ''}
+        item_data['value'].append(new_item_data)
+        
+        self._refresh_ui_from_model(self._get_current_message_body())
+        if self.current_item: self.current_item.update()
+
+    def _remove_item_action(self, selected_item: QTreeWidgetItem):
+        """'아이템 삭제' 액션을 처리합니다."""
+        parent_item = selected_item.parent()
+        if not parent_item:
+            QMessageBox.warning(self, "Action Denied", "Cannot remove the root message body.")
+            return
+
+        reply = QMessageBox.question(self, "Confirm Removal",
+                                     f"Are you sure you want to remove this item?",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                     QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.No: return
+
+        parent_data = parent_item.data(0, Qt.ItemDataRole.UserRole)
+        selected_data = selected_item.data(0, Qt.ItemDataRole.UserRole)
+        
+        if parent_data and parent_data.get('type') == 'L' and selected_data in parent_data.get('value', []):
+            parent_data['value'].remove(selected_data)
+            self._refresh_ui_from_model(self._get_current_message_body())
+            if self.current_item: self.current_item.update()
+
+    def _change_type_action(self, selected_item: QTreeWidgetItem):
+        """'타입 변경' 액션을 처리합니다."""
+        item_data = selected_item.data(0, Qt.ItemDataRole.UserRole)
+        if not item_data: return
+
+        SECS_TYPES = ['L', 'A', 'B', 'U1', 'U2', 'U4', 'I1', 'I2', 'I4', 'F4', 'F8', 'BOOL']
+        new_type, ok = QInputDialog.getItem(self, "Change Item Type", "Select new type:", SECS_TYPES, 0, False)
+        if not ok or new_type == item_data.get('type'): return
+
+        item_data['type'] = new_type
+        item_data['value'] = [] if new_type == 'L' else 0 if new_type not in ['A','B'] else ''
+        
+        self._refresh_ui_from_model(self._get_current_message_body())
+        if self.current_item: self.current_item.update()
+
+    # --- Event Handlers / Slots ---
     @Slot(QTreeWidgetItem, int)
     def on_message_body_item_changed(self, item: QTreeWidgetItem, column: int):
         """사용자가 Tree의 값을 수정했을 때 데이터 모델을 업데이트합니다."""
-        if self._is_internal_update or column != 1:
-            return
-
+        if self._is_internal_update or column != 1: return
         item_data = item.data(0, Qt.ItemDataRole.UserRole)
-        if not item_data:
-            return
+        if not item_data: return
 
-        new_value_str = item.text(1)
-        item_type = item_data.get('type')
-        current_value = item_data.get('value')
-        
-        new_value = current_value
+        new_value_str, item_type = item.text(1), item_data.get('type')
+        current_value, new_value = item_data.get('value'), item_data.get('value')
         try:
-            # ✅ [핵심 기능] 타입에 맞게 값 유효성 검사 및 변환
-            if item_type in ['A', 'B']:
-                new_value = new_value_str
-            elif item_type in ['U1', 'U2', 'U4', 'I1', 'I2', 'I4']:
-                new_value = int(new_value_str)
-            elif item_type in ['F4', 'F8']:
-                new_value = float(new_value_str)
-            elif item_type == 'BOOL':
-                # 'true', '1', 'yes' 등을 True로 인식하도록 처리
-                new_value = new_value_str.lower() in ['true', '1', 't', 'y', 'yes']
-
-            # ✅ [핵심 기능] 변환 성공 시, 실제 데이터 모델(dict)의 값을 업데이트
-            item_data['value'] = new_value
+            if item_type in ['A', 'B']: new_value = new_value_str
+            elif item_type in ['U1', 'U2', 'U4', 'I1', 'I2', 'I4']: new_value = int(new_value_str)
+            elif item_type in ['F4', 'F8']: new_value = float(new_value_str)
+            elif item_type == 'BOOL': new_value = new_value_str.lower() in ['true', '1', 't', 'y', 'yes']
             
-            # ScenarioStepItem의 step_data도 업데이트하여 변경사항을 최종 반영
-            if self.current_item:
-                 self.current_item.update()
-
+            item_data['value'] = new_value
+            if self.current_item: self.current_item.update()
         except (ValueError, TypeError):
-            # ✅ [핵심 기능] 변환 실패 시, UI의 값을 이전 값으로 되돌려 데이터 무결성 유지
             self._is_internal_update = True
             item.setText(1, str(current_value))
             self._is_internal_update = False
@@ -186,8 +253,8 @@ class PropertyEditor(QWidget):
 
     @Slot()
     def on_send_now_clicked(self):
+        """수동 전송 버튼 클릭 시 편집된 메시지 내용을 전송합니다."""
         device_id = self.device_id_combo.currentText()
         if not device_id or not self.current_manual_message:
             return
-        # TODO: 수동 전송 시에도 편집된 메시지 Body가 전송되도록 개선 필요
         self.manual_send_requested.emit(device_id, self.current_manual_message)
