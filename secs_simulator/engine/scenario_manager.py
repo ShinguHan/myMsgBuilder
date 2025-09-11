@@ -17,7 +17,6 @@ class ScenarioManager:
     def get_message_body(self, device_type: str, message_id: str) -> dict | None:
         """
         특정 메시지 라이브러리에서 메시지 본문(dict)을 직접 가져옵니다.
-        UI에서 드롭된 메시지의 상세 정보를 얻기 위해 사용됩니다.
         """
         library = self._load_message_library(device_type)
         return library.get(message_id)
@@ -30,7 +29,7 @@ class ScenarioManager:
         library_path = self._message_library_dir / f"{device_type}.json"
         if not library_path.exists():
             print(f"Warning: Message library not found for type '{device_type}' at {library_path}")
-            self._message_libraries_cache[device_type] = {} # 찾지 못해도 캐시에 기록
+            self._message_libraries_cache[device_type] = {}
             return {}
 
         try:
@@ -52,47 +51,21 @@ class ScenarioManager:
         unique_device_types = set(self._device_types.values())
         
         for device_type in unique_device_types:
-            if device_type: # device_type이 None이 아닌 경우
+            if device_type:
                 all_libs[device_type] = self._load_message_library(device_type)
         return all_libs
 
-    def prepare_scenario(self, master_scenario_path: str) -> Dict[str, Any] | None:
-        """
-        마스터 시나리오를 로드하고 message_id를 실제 메시지 객체로 교체합니다.
-        """
+    def get_device_type(self, device_id: str) -> str | None:
+        """주어진 device_id에 해당하는 device_type을 반환합니다."""
+        return self._device_types.get(device_id)
+
+    def save_scenario(self, scenario_data: dict, file_path: str) -> bool:
+        """시나리오 데이터를 JSON 파일로 저장합니다."""
         try:
-            with open(master_scenario_path, 'r', encoding='utf-8') as f:
-                scenario_data = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError) as e:
-            print(f"Error loading master scenario {master_scenario_path}: {e}")
-            return None
-
-        hydrated_steps = []
-        for step in scenario_data.get('steps', []):
-            if 'message_id' not in step:
-                hydrated_steps.append(step)
-                continue
-
-            device_id = step.get('device_id')
-            message_id = step.get('message_id')
-            
-            device_type = self._device_types.get(device_id)
-            if not device_type:
-                print(f"Scenario Error: Device '{device_id}' not found in device configurations.")
-                continue
-            
-            library = self._load_message_library(device_type)
-            message_body = library.get(message_id)
-
-            if not message_body:
-                print(f"Scenario Error: Message '{message_id}' not found in '{device_type}' library.")
-                continue
-
-            hydrated_step = step.copy()
-            del hydrated_step['message_id']
-            hydrated_step['message'] = message_body
-            hydrated_steps.append(hydrated_step)
-        
-        scenario_data['steps'] = hydrated_steps
-        return scenario_data
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(scenario_data, f, indent=4)
+            return True
+        except Exception as e:
+            print(f"Error saving scenario to {file_path}: {e}")
+            return False
 

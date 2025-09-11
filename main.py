@@ -9,7 +9,8 @@ from PySide6.QtCore import QFile, QTextStream
 from secs_simulator.engine.orchestrator import Orchestrator
 from secs_simulator.ui.main_window import MainWindow
 
-async def status_update_callback(window: MainWindow, device_id: str, status: str):
+# ✅ [오류 수정] Orchestrator가 전달하는 3개의 인자(dev_id, status, color)를 모두 받도록 수정합니다.
+async def status_update_callback(window: MainWindow, device_id: str, status: str, color: str):
     """Orchestrator가 UI 업데이트를 위해 호출할 콜백. UI의 Signal을 emit합니다."""
     # 상태 메시지에 따라 색상을 결정하는 간단한 로직
     color = "gray"
