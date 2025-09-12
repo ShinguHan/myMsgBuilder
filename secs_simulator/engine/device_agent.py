@@ -26,6 +26,7 @@ class DeviceAgent:
         self._connection: Optional[HsmsConnection] = None
         self._command_queue = asyncio.Queue()
         self._main_task: Optional[asyncio.Task] = None
+        # ✅ [기능 추가] 수신 메시지를 저장하고 대기하기 위한 큐
         self._incoming_message_queue = asyncio.Queue()
 
     async def start(self) -> None:
@@ -46,7 +47,6 @@ class DeviceAgent:
         except Exception as e:
             await self._update_status(f"Error: {e}")
             print(f"An unexpected error occurred while starting agent '{self.device_id}': {e}")
-
 
     async def stop(self) -> None:
         """에이전트의 서버와 모든 태스크를 안전하게 중지합니다."""
@@ -80,16 +80,22 @@ class DeviceAgent:
             final_color = "gray"
             if "Listening" in status:
                 final_color = "orange"
-            elif "Connected" in status or "Sent" in status:
+            elif "Connected" in status or "Sent" in status or "Received" in status:
                 final_color = "green"
-            elif "Error" in status:
+            elif "Waiting" in status:
+                final_color = "yellow"
+            elif "Error" in status or "Timeout" in status:
                 final_color = "red"
         
         await self.status_callback(self.device_id, status, final_color)
         
     async def _on_message_received(self, message: dict) -> None:
-        """HsmsConnection으로부터 메시지를 받아 큐에 추가합니다."""
+        """✅ [기능 추가] HsmsConnection으로부터 메시지를 받아 큐에 추가합니다."""
         await self._incoming_message_queue.put(message)
+        s = message.get('s', '?')
+        f = message.get('f', '?')
+        await self._update_status(f"Received S{s}F{f}")
+
 
     async def _on_client_connected(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         """Host가 접속했을 때 호출되는 콜백 함수."""
@@ -103,15 +109,16 @@ class DeviceAgent:
 
     async def wait_for_message(self, s: int, f: int, timeout: float) -> Optional[dict]:
         """
-        큐에서 특정 SxFy 메시지가 수신될 때까지 기다립니다.
+        ✅ [기능 추가] 큐에서 특정 SxFy 메시지가 수신될 때까지 기다립니다.
         타임아웃 시 None을 반환합니다.
         """
+        await self._update_status(f"Waiting for S{s}F{f}...", "yellow")
         try:
+            # 타임아웃을 설정하고 큐를 기다립니다.
             async with asyncio.timeout(timeout):
                 while True:
                     msg = await self._incoming_message_queue.get()
                     if msg.get('s') == s and msg.get('f') == f:
-                        await self._update_status(f"Received matching S{s}F{f}")
                         return msg
         except TimeoutError:
             await self._update_status(f"Timeout waiting for S{s}F{f}", "red")

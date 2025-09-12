@@ -75,6 +75,7 @@ class Orchestrator:
         self._scenario_task = asyncio.create_task(self._run_scenario_steps(scenario_data))
 
     async def _run_scenario_steps(self, scenario_data: Dict[str, Any]) -> None:
+        """✅ [핵심 수정] 'send'와 'wait_recv' 액션을 모두 처리하도록 개선된 실행기입니다."""
         try:
             for step in scenario_data.get('steps', []):
                 if not self.is_running:
@@ -84,6 +85,7 @@ class Orchestrator:
                 device_id = step.get('device_id')
                 target_agent = self._agents.get(device_id)
 
+                # --- 'wait_recv' 액션 처리 ---
                 if 'wait_recv' in step:
                     if not target_agent:
                         print(f"Scenario Warning: Device '{device_id}' not found for wait_recv.")
@@ -92,22 +94,19 @@ class Orchestrator:
                     match_criteria = step['wait_recv']
                     s = match_criteria.get('s')
                     f = match_criteria.get('f')
-                    timeout = step.get('timeout', 10.0)
+                    timeout = step.get('timeout', 10.0) # 기본 타임아웃 10초
 
                     if s is not None and f is not None:
-                        status_msg = f"Waiting for S{s}F{f} from {device_id}..."
-                        print(status_msg)
-                        await self._status_callback("Orchestrator", status_msg, "blue")
-                        
                         result = await target_agent.wait_for_message(s, f, timeout)
                         if result is None:
                             error_msg = f"Scenario FAIL: Timed out waiting for S{s}F{f} from {device_id}"
                             print(error_msg)
                             await self._status_callback("Orchestrator", error_msg, "red")
-                            break
+                            break # 타임아웃 시 시나리오 중단
                     else:
                         print(f"Scenario Warning: Invalid 'wait_recv' criteria for device '{device_id}'.")
                 
+                # --- 'message' (send) 액션 처리 ---
                 if 'message' in step:
                     if not target_agent:
                         print(f"Scenario Warning: Device '{device_id}' not found for send message.")
@@ -120,6 +119,7 @@ class Orchestrator:
                         body=message.get('body')
                     )
 
+                # --- Delay 처리 ---
                 if (delay := step.get('delay', 0)) > 0:
                     await asyncio.sleep(delay)
         
