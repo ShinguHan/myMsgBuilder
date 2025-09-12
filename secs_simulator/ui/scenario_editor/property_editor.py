@@ -1,6 +1,8 @@
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QFormLayout,
-                               QComboBox, QDoubleSpinBox, QTreeWidget, QTreeWidgetItem,
-                               QPushButton, QMenu, QInputDialog, QMessageBox)
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QLabel, QFormLayout,
+    QComboBox, QDoubleSpinBox, QTreeWidget, QTreeWidgetItem,
+    QPushButton, QMenu, QInputDialog, QMessageBox
+)
 from PySide6.QtCore import Slot, Qt, Signal
 import uuid
 import copy
@@ -54,6 +56,29 @@ class PropertyEditor(QWidget):
         
         self.clear_view()
 
+    # --- 헬퍼 함수 ---
+    def _find_item_by_id(self, data_list, target_id):
+        """body 리스트 안에서 id로 항목을 찾아 반환 (재귀 탐색)."""
+        for item in data_list:
+            if item.get('id') == target_id:
+                return item
+            if item.get('type') == 'L' and isinstance(item.get('value'), list):
+                found = self._find_item_by_id(item['value'], target_id)
+                if found:
+                    return found
+        return None
+
+    def _remove_item_by_id(self, data_list, target_id):
+        """id로 항목을 찾아 삭제 (재귀 탐색)."""
+        for idx, item in enumerate(data_list):
+            if item.get('id') == target_id:
+                data_list.pop(idx)
+                return True
+            if item.get('type') == 'L' and isinstance(item.get('value'), list):
+                if self._remove_item_by_id(item['value'], target_id):
+                    return True
+        return False
+
     # --- UI Mode Control ---
     def clear_view(self):
         self._is_internal_update = True
@@ -93,10 +118,13 @@ class PropertyEditor(QWidget):
     def _populate_common_fields(self, data_source: dict):
         device_type = data_source.get("device_type")
         self.device_id_combo.clear()
-        available_devices = [dev_id for dev_id, conf in self.device_configs.items() if conf.get('type') == device_type]
+        available_devices = [
+            dev_id for dev_id, conf in self.device_configs.items()
+            if conf.get('type') == device_type
+        ]
         self.device_id_combo.addItems(available_devices)
         if isinstance(data_source, dict) and data_source.get("device_id"):
-             self.device_id_combo.setCurrentText(data_source.get("device_id"))
+            self.device_id_combo.setCurrentText(data_source.get("device_id"))
         
         self.delay_spinbox.setValue(data_source.get("delay", 0))
 
@@ -151,19 +179,9 @@ class PropertyEditor(QWidget):
         
         menu.exec(self.message_body_tree.mapToGlobal(position))
 
-    def _find_item_by_id(self, data_list, target_id):
-        """body 리스트 안에서 id로 항목을 찾아 반환 (재귀 탐색)."""
-        for item in data_list:
-            if item.get('id') == target_id:
-                return item
-            if item.get('type') == 'L' and isinstance(item.get('value'), list):
-                found = self._find_item_by_id(item['value'], target_id)
-                if found:
-                    return found
-        return None
-
     def _add_item_action(self, selected_item: QTreeWidgetItem | None):
-        SECS_TYPES = ['L', 'A', 'B', 'U1', 'U2', 'U4', 'I1', 'I2', 'I4', 'F4', 'F8', 'BOOL']
+        SECS_TYPES = ['L', 'A', 'B', 'U1', 'U2', 'U4',
+                      'I1', 'I2', 'I4', 'F4', 'F8', 'BOOL']
         item_type, ok = QInputDialog.getItem(
             self, "Add SECS Item", "Select item type:", SECS_TYPES, 0, False
         )
@@ -181,10 +199,9 @@ class PropertyEditor(QWidget):
         if selected_item:
             selected_data = selected_item.data(0, Qt.ItemDataRole.UserRole)
             if selected_data:
-                # ✅ id로 모델 내 실제 객체 찾기
                 root_list = self._get_current_message_body()
                 real_data = self._find_item_by_id(root_list, selected_data.get('id'))
-                
+
                 if real_data and real_data.get('type') == 'L':
                     target_list = real_data['value']
                 else:
@@ -201,53 +218,56 @@ class PropertyEditor(QWidget):
 
         self._sync_model_and_views()
 
-
-
     def _remove_item_action(self, selected_item: QTreeWidgetItem):
-        reply = QMessageBox.question(self, "Confirm Removal",
-                                     "Are you sure you want to remove this item and all its children?",
-                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                                     QMessageBox.StandardButton.No)
-        if reply == QMessageBox.StandardButton.No: return
+        reply = QMessageBox.question(
+            self, "Confirm Removal",
+            "Are you sure you want to remove this item and all its children?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.No:
+            return
 
         selected_data = selected_item.data(0, Qt.ItemDataRole.UserRole)
         if not selected_data:
             return
-        
-        target_list = None
-        parent_item = selected_item.parent()
-        if parent_item:
-            parent_data = parent_item.data(0, Qt.ItemDataRole.UserRole)
-            if parent_data and parent_data.get('type') == 'L':
-                target_list = parent_data.get('value')
-        else:
-            target_list = self._get_current_message_body()
-        
-        if target_list is not None:
-            target_list[:] = [x for x in target_list if x.get('id') != selected_data.get('id')]
+
+        root_list = self._get_current_message_body()
+        if root_list:
+            self._remove_item_by_id(root_list, selected_data.get('id'))
 
         self._sync_model_and_views()
 
     def _change_type_action(self, selected_item: QTreeWidgetItem):
-        item_data = selected_item.data(0, Qt.ItemDataRole.UserRole)
-        if not item_data: return
+        selected_data = selected_item.data(0, Qt.ItemDataRole.UserRole)
+        if not selected_data:
+            return
 
-        SECS_TYPES = ['L', 'A', 'B', 'U1', 'U2', 'U4', 'I1', 'I2', 'I4', 'F4', 'F8', 'BOOL']
-        current_type_index = SECS_TYPES.index(item_data.get('type')) if item_data.get('type') in SECS_TYPES else 0
-        new_type, ok = QInputDialog.getItem(self, "Change Item Type", "Select new type:", SECS_TYPES, current_type_index, False)
-        
-        if not ok or new_type == item_data.get('type'): return
+        root_list = self._get_current_message_body()
+        real_data = self._find_item_by_id(root_list, selected_data.get('id'))
+        if not real_data:
+            return
 
-        item_data['type'] = new_type
+        SECS_TYPES = ['L', 'A', 'B', 'U1', 'U2', 'U4',
+                      'I1', 'I2', 'I4', 'F4', 'F8', 'BOOL']
+        current_type_index = SECS_TYPES.index(real_data.get('type')) if real_data.get('type') in SECS_TYPES else 0
+        new_type, ok = QInputDialog.getItem(
+            self, "Change Item Type", "Select new type:",
+            SECS_TYPES, current_type_index, False
+        )
+        if not ok or new_type == real_data.get('type'):
+            return
+
+        real_data['type'] = new_type
         if new_type == 'L':
-            item_data['value'] = []
+            real_data['value'] = []
         elif new_type in ['A', 'B']:
-            item_data['value'] = ''
+            real_data['value'] = ''
         elif new_type == 'BOOL':
-            item_data['value'] = False
+            real_data['value'] = False
         else:
-            item_data['value'] = 0
-        
+            real_data['value'] = 0
+
         self._sync_model_and_views()
     
     def _sync_model_and_views(self):
@@ -260,12 +280,18 @@ class PropertyEditor(QWidget):
     def on_message_body_item_changed(self, item: QTreeWidgetItem, column: int):
         if self._is_internal_update or column != 1:
             return
+
         item_data = item.data(0, Qt.ItemDataRole.UserRole)
         if not item_data or item_data.get('type') == 'L':
             return
 
-        new_value_str, item_type = item.text(1), item_data.get('type')
-        current_value = item_data.get('value')
+        root_list = self._get_current_message_body()
+        real_data = self._find_item_by_id(root_list, item_data.get('id'))
+        if not real_data:
+            return
+
+        new_value_str, item_type = item.text(1), real_data.get('type')
+        current_value = real_data.get('value')
         
         try:
             new_value = current_value
@@ -279,7 +305,7 @@ class PropertyEditor(QWidget):
                 new_value = new_value_str.lower() in ['true', '1', 't', 'y', 'yes']
             
             if new_value != current_value:
-                item_data['value'] = new_value
+                real_data['value'] = new_value
                 self._sync_model_and_views()
         except (ValueError, TypeError):
             self._is_internal_update = True
