@@ -32,7 +32,7 @@ class ScenarioEditorWidget(QWidget):
         splitter.addWidget(self.timeline_view)
         splitter.addWidget(self.property_editor)
         
-        splitter.setSizes([250, 600, 350])
+        splitter.setSizes([250, 600, 450])
 
         # --- 시그널-슬롯 연결 ---
         self.timeline_view.step_selected.connect(self.property_editor.display_step_properties)
