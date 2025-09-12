@@ -126,19 +126,33 @@ class PropertyEditor(QWidget):
     def _populate_common_fields(self, data_source: dict):
         device_type = data_source.get("device_type")
         self.device_id_combo.clear()
+        
         available_devices = [
             dev_id for dev_id, conf in self.device_configs.items()
             if conf.get('type') == device_type
         ]
         self.device_id_combo.addItems(available_devices)
-        if isinstance(data_source, dict) and data_source.get("device_id"):
-            self.device_id_combo.setCurrentText(data_source.get("device_id"))
+
+        current_device_id = data_source.get("device_id")
         
+        # [핵심 수정] 자동 선택 로직을 더 명확하게 변경
+        if len(available_devices) == 1 and current_device_id not in available_devices:
+            new_device_id = available_devices[0]
+            self.device_id_combo.setCurrentText(new_device_id)
+            
+            # 타임라인 스텝을 편집하는 경우, 데이터 모델을 즉시 업데이트합니다.
+            if self.current_item:
+                self.current_item.step_data["device_id"] = new_device_id
+                self.current_item.update_visuals()
+        else:
+            # 자동 선택 조건이 아닐 경우, 기존 데이터의 값으로 UI를 설정합니다.
+            self.device_id_combo.setCurrentText(current_device_id)
+
         self.delay_spinbox.setValue(data_source.get("delay", 0))
 
         message_body = self._get_current_message_body()
         if message_body is not None:
-            self._ensure_ids(message_body)  # <<< 핵심 수정: UI에 표시하기 전에 ID를 부여합니다.
+            self._ensure_ids(message_body)
         
         self._refresh_ui_from_model(message_body)
     

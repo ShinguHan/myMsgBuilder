@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from typing import Dict, Any
+import copy
 
 class ScenarioManager:
     """
@@ -16,10 +17,12 @@ class ScenarioManager:
 
     def get_message_body(self, device_type: str, message_id: str) -> dict | None:
         """
-        특정 메시지 라이브러리에서 메시지 본문(dict)을 직접 가져옵니다.
+        특정 메시지 라이브러리에서 메시지 본문(dict)의 깊은 복사본을 가져옵니다.
         """
         library = self._load_message_library(device_type)
-        return library.get(message_id)
+        message = library.get(message_id)
+        # ✅ [핵심 수정] 원본 라이브러리가 수정되지 않도록 깊은 복사본을 반환합니다.
+        return copy.deepcopy(message) if message else None
 
     def _load_message_library(self, device_type: str) -> Dict[str, Any]:
         """장비 타입에 맞는 메시지 라이브러리를 로드하고 캐싱합니다."""

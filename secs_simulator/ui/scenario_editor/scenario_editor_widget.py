@@ -1,5 +1,6 @@
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QSplitter
 from PySide6.QtCore import Qt, Signal
+import copy
 
 from .message_library_view import MessageLibraryView
 from .scenario_timeline_view import ScenarioTimelineView
@@ -39,32 +40,52 @@ class ScenarioEditorWidget(QWidget):
     def export_to_scenario_data(self) -> dict:
         """현재 타임라인을 실행 가능한 JSON 데이터로 변환합니다."""
         steps = []
-        sorted_items = sorted(self.timeline_view.scene.items(), key=lambda item: item.y())
+        # QGraphicsScene.items()는 정렬 순서를 보장하지 않으므로 y좌표로 정렬합니다.
+        sorted_items = sorted(
+            [item for item in self.timeline_view.scene.items() if isinstance(item, ScenarioStepItem)],
+            key=lambda item: item.y()
+        )
         
         for item in sorted_items:
-            if isinstance(item, ScenarioStepItem):
-                clean_data = {
-                    "device_id": item.step_data.get("device_id"),
-                    "delay": item.step_data.get("delay"),
-                    "message": item.step_data.get("message")
-                }
-                steps.append(clean_data)
+            # 실행에 필요한 최소한의 데이터만 포함시킵니다.
+            clean_data = {
+                "device_id": item.step_data.get("device_id"),
+                "delay": item.step_data.get("delay", 0.0),
+                "message": item.step_data.get("message")
+            }
+            steps.append(clean_data)
         
         return {"name": "VisualEditorScenario", "steps": steps}
+
+    def _strip_ids_recursive(self, data_list: list):
+        """저장 전, UI에서만 사용되는 'id' 필드를 재귀적으로 제거합니다."""
+        for item in data_list:
+            if 'id' in item:
+                del item['id']
+            if item.get('type') == 'L' and isinstance(item.get('value'), list):
+                self._strip_ids_recursive(item['value'])
 
     def export_to_master_scenario(self) -> dict:
         """현재 타임라인을 저장 가능한 master_scenario 형식으로 변환합니다."""
         steps = []
-        sorted_items = sorted(self.timeline_view.scene.items(), key=lambda item: item.y())
+        sorted_items = sorted(
+            [item for item in self.timeline_view.scene.items() if isinstance(item, ScenarioStepItem)],
+            key=lambda item: item.y()
+        )
         
         for item in sorted_items:
-            if isinstance(item, ScenarioStepItem):
-                step_data = {
-                    "device_id": item.step_data.get("device_id"),
-                    "delay": item.step_data.get("delay"),
-                    "message_id": item.step_data.get("message_id")
-                }
-                steps.append(step_data)
+            # 원본 데이터가 바뀌지 않도록 깊은 복사를 합니다.
+            step_data_copy = copy.deepcopy(item.step_data)
+
+            # 복사된 데이터에서 'message' 객체의 'body' 내부의 모든 'id'를 제거합니다.
+            if 'message' in step_data_copy and 'body' in step_data_copy['message']:
+                self._strip_ids_recursive(step_data_copy['message']['body'])
+            
+            # UI에서만 사용되던 'device_type'과 'step_id'는 저장하지 않습니다.
+            step_data_copy.pop('device_type', None)
+            step_data_copy.pop('step_id', None)
+            
+            steps.append(step_data_copy)
         
         return {"name": "VisualEditorScenario", "steps": steps}
 
@@ -78,19 +99,37 @@ class ScenarioEditorWidget(QWidget):
         for step_data in scenario_data.get("steps", []):
             device_id = step_data.get("device_id")
             message_id = step_data.get("message_id")
-            if not all([device_id, message_id]): continue
-
-            device_type = manager.get_device_type(device_id)
-            if not device_type: continue
-
-            message_body = manager.get_message_body(device_type, message_id)
-            if not message_body: continue
             
-            full_step_data = {**step_data, "message": message_body, "device_type": device_type}
+            if not device_id:
+                continue
+
+            # 로드된 데이터에 'message' 객체가 있는지 확인합니다.
+            if 'message' in step_data:
+                message_body = step_data['message']
+            # 없다면, message_id로 라이브러리에서 가져옵니다.
+            elif message_id:
+                device_type = manager.get_device_type(device_id)
+                if device_type:
+                    message_body = manager.get_message_body(device_type, message_id)
+                else:
+                    message_body = None
+            else:
+                continue
+            
+            if not message_body:
+                continue
+            
+            # 타임라인 아이템 생성을 위한 완전한 데이터 구성
+            full_step_data = {
+                "device_id": device_id,
+                "delay": step_data.get("delay", 0.0),
+                "message_id": message_id,
+                "message": message_body,
+                "device_type": manager.get_device_type(device_id)
+            }
 
             item = ScenarioStepItem(full_step_data)
             item.signals.selected.connect(self.timeline_view.step_selected)
             self.timeline_view.scene.addItem(item)
             item.setPos(10, self.timeline_view.y_pos_counter)
             self.timeline_view.y_pos_counter += item.boundingRect().height() + 10
-
