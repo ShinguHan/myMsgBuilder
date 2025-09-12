@@ -138,7 +138,7 @@ class ScenarioEditorWidget(QWidget):
 
 
             item = ScenarioStepItem(full_step_data)
-            item.signals.selected.connect(self.timeline_view.step_selected)
+            # item.signals.selected.connect(self.timeline_view.step_selected)
             self.timeline_view.scene.addItem(item)
             item.setPos(10, self.timeline_view.y_pos_counter)
             self.timeline_view.y_pos_counter += item.boundingRect().height() + 10

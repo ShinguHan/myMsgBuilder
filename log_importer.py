@@ -19,7 +19,7 @@ def convert_secs_item_to_dict(item: SecsItem) -> Dict[str, Any]:
         }
     if item.type == 'B' and isinstance(item.value, bytes):
          return {"type": "B", "value": item.value.hex().upper()}
-    return {"type": "item.type", "value": item.value}
+    return {"type": item.type, "value": item.value}
 
 
 def get_messages_from_log(log_filepath: str, profile_path: str) -> List[Dict[str, Any]]:

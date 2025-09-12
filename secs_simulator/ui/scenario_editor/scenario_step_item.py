@@ -1,5 +1,4 @@
 # secs_simulator/ui/scenario_editor/scenario_step_item.py
-
 import uuid
 from PySide6.QtWidgets import QGraphicsItem, QStyleOptionGraphicsItem, QWidget
 from PySide6.QtCore import QRectF, Qt
@@ -30,67 +29,68 @@ class ScenarioStepItem(QGraphicsItem):
 
     def _calculate_height(self):
         """데이터 내용에 따라 아이템의 높이를 동적으로 계산합니다."""
-        # ✅ [핵심 수정] wait_recv와 message의 존재 여부에 따라 높이를 다르게 설정합니다.
         is_wait = 'wait_recv' in self.step_data
         is_send = 'message' in self.step_data and self.step_data['message']
 
         if is_wait and not is_send: # Wait 전용 스텝
             self.height = 70
         elif not is_wait and is_send: # Send 전용 스텝
-            body = self.step_data.get("message", {}).get("body", [])
-            body_line_count = 1 if body else 0
-            self.height = 80 + (body_line_count * 15)
+            self.height = 80
         else: # 기본 또는 오류 상태
             self.height = 50
 
     def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem, widget: QWidget = None):
-        """✅ [핵심 수정] Send와 Wait 상태를 구분하여 그립니다."""
+        """✅ [개선] Send/Wait 상태 및 경고 상태를 구분하여 그립니다."""
         rect = self.boundingRect()
         
-        # 선택 상태에 따른 브러시 및 펜 설정
         is_selected = self.isSelected()
+        
+        # ✅ 1. 상태 표시: Device ID가 설정되지 않았으면 경고 상태로 표시
+        is_warning = self.step_data.get('device_id', 'N/A') == 'Select Device...'
+        
         bg_color = "#3478F6" if is_selected else "#1E1E1E"
-        border_color = "#508FF7" if is_selected else "#454545"
+        # 경고 상태일 경우 테두리 색상을 주황색으로, 선택 시 밝은 주황색으로 변경
+        if is_warning:
+            border_color = "#FFA500" if not is_selected else "#FFC56E"
+        else:
+            border_color = "#508FF7" if is_selected else "#454545"
         
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(QPen(QColor(border_color), 1))
+        painter.setPen(QPen(QColor(border_color), 1.5)) # 테두리 두께 강조
         painter.setBrush(QBrush(QColor(bg_color)))
         painter.drawRoundedRect(rect, 8.0, 8.0)
 
         painter.save()
         
         device_id = self.step_data.get('device_id', 'N/A')
-        delay = self.step_data.get('delay', 0.0)
         
         # --- 아이콘 및 제목 ---
         icon_font = QFont("Arial", 16)
         painter.setFont(icon_font)
         
+        # ✅ 2. 정보 요약 및 시각화 (Wait)
         if 'wait_recv' in self.step_data:
-            # Wait 액션일 경우
             icon = "⏳"
             s = self.step_data['wait_recv'].get('s', '?')
             f = self.step_data['wait_recv'].get('f', '?')
-            timeout = self.step_data.get('timeout', 10)
-            title_text = f"Wait for S{s}F{f}"
-            details_html = f"""
-                <p style='color: #AAAAAA; font-size: 12px; margin: 0;'>Device: {device_id}</p>
-                <p style='color: #FFCC00; font-size: 12px; margin: 0;'>Timeout: {timeout:.1f}s</p>
-            """
+            title_text = f"<b>Wait for</b> S{s}F{f}"
+            details_html = f"<p style='margin:0; font-size:12px;'>From: {device_id}</p>"
+        # ✅ 2. 정보 요약 및 시각화 (Send)
         elif 'message' in self.step_data:
-            # Send 액션일 경우
             icon = "📤"
             message_id = self.step_data.get('message_id', 'Custom Msg')
-            title_text = f"Send: {message_id}"
+            delay = self.step_data.get('delay', 0.0)
+            
             body = self.step_data["message"].get("body", [])
-            body_preview = json.dumps(body)
-            body_preview = (body_preview[:35] + '...') if len(body_preview) > 35 else body_preview
+            body_item_count = len(body[0].get('value', [])) if body and body[0].get('type') == 'L' else len(body)
+            body_summary = f"L [{body_item_count} items]" if body and body[0].get('type') == 'L' else f"Body [{len(body)} items]"
+
+            title_text = f"<b>Send</b>: {message_id}"
             details_html = f"""
-                <p style='color: #AAAAAA; font-size: 12px; margin: 0;'>To: {device_id}</p>
-                <p style='color: #FFCC00; font-size: 12px; margin: 0;'>Delay: {delay:.1f}s</p>
-                <p style='color: #77DD77; font-size: 10px; margin: 0; font-family: Courier New;'>{body_preview}</p>
+                <p style='margin:0; font-size:12px;'>To: {device_id}</p>
+                <p style='margin:0; font-size:11px; color:#AAAAAA;'>Delay: {delay:.1f}s | {body_summary}</p>
             """
-        else: # 기본 상태
+        else:
             icon = "❓"
             title_text = "Empty Step"
             details_html = ""
@@ -99,8 +99,8 @@ class ScenarioStepItem(QGraphicsItem):
 
         # --- 텍스트 내용 ---
         main_text_html = f"""
-        <div style='color: #E0E0E0; padding: 2px;'>
-            <b style='font-size: 14px;'>{title_text}</b>
+        <div style='color: #E0E0E0; padding: 2px; font-size: 14px;'>
+            {title_text}
             {details_html}
         </div>
         """
@@ -109,7 +109,7 @@ class ScenarioStepItem(QGraphicsItem):
         doc.setHtml(main_text_html)
         doc.setTextWidth(self.width - 50) 
         
-        painter.translate(45, 5) # 아이콘 옆으로 텍스트 위치 조정
+        painter.translate(45, 8)
         doc.drawContents(painter)
 
         painter.restore()
@@ -119,7 +119,7 @@ class ScenarioStepItem(QGraphicsItem):
         self.signals.position_changed.emit(self)
         
     def update_visuals(self):
+        """외부에서 호출하여 아이템의 모양과 내용을 갱신합니다."""
         self.prepareGeometryChange()
         self._calculate_height()
         self.update()
-
