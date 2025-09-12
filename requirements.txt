@@ -3,3 +3,4 @@ qasync
 pytest
 pytest-asyncio
 pytest-cov
+pandas

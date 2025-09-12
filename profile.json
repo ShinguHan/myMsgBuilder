@@ -1,0 +1,15 @@
+{
+    "column_mapping": {
+        "timestamp": "SystemDate",
+        "category": "Category",
+        "binary_data": "BinaryData",
+        "ascii_data": "AsciiData",
+        "method_id": "MethodID" 
+    },
+    "type_rules": [
+        {
+            "value": "SECS-II",
+            "type": "secs"
+        }
+    ]
+}

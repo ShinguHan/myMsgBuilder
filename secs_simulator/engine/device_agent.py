@@ -1,5 +1,3 @@
-# secs_simulator/engine/device_agent.py
-
 import asyncio
 from typing import Callable, Awaitable, Optional
 
@@ -12,13 +10,6 @@ class DeviceAgent:
     """
 
     def __init__(self, device_id: str, host: str, port: int, status_callback: Callable[[str, str, str], Awaitable]):
-        """
-        Args:
-            device_id (str): 이 장비의 고유 ID (e.g., "CV_01")
-            host (str): 서버를 실행할 호스트 주소
-            port (int): 서버가 리슨할 포트 번호
-            status_callback (Callable): 상태 변경 시 상위 컨트롤러(UI)에 알릴 비동기 콜백
-        """
         self.device_id = device_id
         self.host = host
         self.port = port
@@ -28,11 +19,18 @@ class DeviceAgent:
         self._connection: Optional[HsmsConnection] = None
         self._command_queue = asyncio.Queue()
         self._main_task: Optional[asyncio.Task] = None
-        # ✅ [기능 추가] 수신 메시지를 저장하고 대기하기 위한 큐
         self._incoming_message_queue = asyncio.Queue()
+        
+        # ✅ [핵심 수정] System Bytes 카운터를 Connection이 아닌 Agent가 직접 관리합니다.
+        self._system_bytes_counter = 0
+
+    def _get_next_system_bytes(self) -> int:
+        """다음에 사용할 System Bytes 값을 반환하고 1 증가시킵니다."""
+        self._system_bytes_counter = (self._system_bytes_counter + 1) & 0xFFFFFFFF
+        return self._system_bytes_counter
 
     async def start(self) -> None:
-        """에이전트의 HSMS 서버를 시작하고 명령 처리 루프를 가동합니다."""
+        # ... (기존 코드와 동일) ...
         if self._server:
             print(f"Agent '{self.device_id}' is already running.")
             return
@@ -51,7 +49,7 @@ class DeviceAgent:
             print(f"An unexpected error occurred while starting agent '{self.device_id}': {e}")
 
     async def stop(self) -> None:
-        """에이전트의 서버와 모든 태스크를 안전하게 중지합니다."""
+        # ... (기존 코드와 동일) ...
         if self._main_task and not self._main_task.done():
             self._main_task.cancel()
         
@@ -67,16 +65,17 @@ class DeviceAgent:
         self._connection = None
         await self._update_status("Stopped")
 
-    async def send_message(self, s: int, f: int, body: Optional[list] = None) -> None:
+    async def send_message(self, s: int, f: int, w_bit: bool, body: Optional[list] = None) -> int:
         """
-        외부(Orchestrator)에서 호출하는 비동기 API.
-        명령 큐에 메시지 전송 요청을 넣습니다.
+        ✅ [핵심 수정] 메시지 전송 명령을 큐에 넣고, 사용될 System Bytes를 반환합니다.
         """
-        command = {"action": "send", "s": s, "f": f, "body": body or []}
+        system_bytes = self._get_next_system_bytes()
+        command = {"action": "send", "s": s, "f": f, "w_bit": w_bit, "body": body or [], "system_bytes": system_bytes}
         await self._command_queue.put(command)
+        return system_bytes
 
     async def _update_status(self, status: str, color: str = "default") -> None:
-        """상태 변경을 상위 관리자에게 비동기적으로 보고하고, 상태에 따라 색상을 결정합니다."""
+        # ... (기존 코드와 동일) ...
         final_color = color
         if color == "default":
             final_color = "gray"
@@ -92,7 +91,7 @@ class DeviceAgent:
         await self.status_callback(self.device_id, status, final_color)
         
     async def _on_message_received(self, message: dict) -> None:
-        """✅ [기능 추가] HsmsConnection으로부터 메시지를 받아 큐에 추가합니다."""
+        # ... (기존 코드와 동일) ...
         await self._incoming_message_queue.put(message)
         s = message.get('s', '?')
         f = message.get('f', '?')
@@ -100,7 +99,7 @@ class DeviceAgent:
 
 
     async def _on_client_connected(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        """Host가 접속했을 때 호출되는 콜백 함수."""
+        # ... (기존 코드와 동일) ...
         await self._update_status("Host Connected")
         self._connection = HsmsConnection(reader, writer, message_callback=self._on_message_received)
         try:
@@ -109,26 +108,30 @@ class DeviceAgent:
             self._connection = None
             await self._update_status(f"Listening on {self.host}:{self.port}")
 
-    async def wait_for_message(self, s: int, f: int, timeout: float) -> Optional[dict]:
+    async def wait_for_message(self, s: int, f: int, timeout: float, system_bytes: int) -> Optional[dict]:
         """
-        ✅ [기능 추가] 큐에서 특정 SxFy 메시지가 수신될 때까지 기다립니다.
-        타임아웃 시 None을 반환합니다.
+        ✅ [핵심 수정] S/F뿐만 아니라 System Bytes까지 일치하는 메시지를 기다립니다.
         """
-        await self._update_status(f"Waiting for S{s}F{f}...", "yellow")
+        await self._update_status(f"Waiting for S{s}F{f} (Reply to SB={system_bytes})", "yellow")
         try:
-            # 타임아웃을 설정하고 큐를 기다립니다.
             async with asyncio.timeout(timeout):
                 while True:
                     msg = await self._incoming_message_queue.get()
-                    if msg.get('s') == s and msg.get('f') == f:
+                    if msg.get('s') == s and msg.get('f') == f and msg.get('system_bytes') == system_bytes:
                         return msg
+                    else:
+                        # 관련 없는 메시지는 무시하고 계속 다음 메시지를 확인합니다.
+                        unmatched_s = msg.get('s', '?')
+                        unmatched_f = msg.get('f', '?')
+                        unmatched_sb = msg.get('system_bytes', '?')
+                        print(f"  - Ignored unmatched message S{unmatched_s}F{unmatched_f} SB={unmatched_sb} while waiting.")
         except TimeoutError:
-            await self._update_status(f"Timeout waiting for S{s}F{f}", "red")
+            await self._update_status(f"Timeout waiting for S{s}F{f} (Reply to SB={system_bytes})", "red")
             return None
 
     async def _command_processor(self) -> None:
         """
-        명령 큐를 감시하고 명령을 처리하는 메인 루프.
+        ✅ [핵심 수정] 큐에 들어온 명령의 system_bytes를 사용하여 메시지를 전송합니다.
         """
         while True:
             command = None
@@ -137,14 +140,14 @@ class DeviceAgent:
                 
                 if command['action'] == 'send':
                     if self._connection and self._connection.is_selected:
-                        temp_system_bytes = self._connection.get_next_system_bytes()
                         await self._connection.send_secs_message(
                             s=command['s'],
                             f=command['f'],
-                            system_bytes=temp_system_bytes,
+                            w_bit=command['w_bit'],
+                            system_bytes=command['system_bytes'],
                             body_obj=command['body']
                         )
-                        await self._update_status(f"Sent S{command['s']}F{command['f']}")
+                        await self._update_status(f"Sent S{command['s']}F{command['f']} (SB={command['system_bytes']})")
                     else:
                         await self._update_status("Cannot send: Not connected or not selected.")
             except asyncio.CancelledError:
