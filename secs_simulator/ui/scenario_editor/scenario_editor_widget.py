@@ -34,6 +34,8 @@ class ScenarioEditorWidget(QWidget):
 
         # --- 시그널-슬롯 연결 ---
         self.timeline_view.step_selected.connect(self.property_editor.display_step_properties)
+        # ✅ [기능 추가] 스텝 삭제 신호를 속성 편집기 클리어 슬롯에 연결
+        self.timeline_view.step_deleted.connect(self.property_editor.clear_view)
         self.library_view.message_selected.connect(self.property_editor.display_for_manual_send)
         self.property_editor.manual_send_requested.connect(self.manual_send_requested)
     
