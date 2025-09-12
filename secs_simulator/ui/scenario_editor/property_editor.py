@@ -111,11 +111,20 @@ class PropertyEditor(QWidget):
             
     # --- UI Mode Control ---
     def clear_view(self):
+        """선택된 아이템이 없을 때 속성 편집기를 비활성화하고 초기화합니다."""
         self._is_internal_update = True
         self.current_item = None
         self.current_manual_message = None
         
-        self.action_type_combo.setCurrentIndex(0)
+        # 모든 컨트롤을 비활성화합니다.
+        self.action_type_combo.setEnabled(False)
+        self.device_id_combo.setEnabled(False)
+        self.delay_spinbox.setEnabled(False)
+        self.send_panel.hide()
+        self.wait_panel.hide()
+        self.send_now_button.hide()
+
+        # UI 값들을 초기화합니다.
         self.device_id_combo.clear()
         self.delay_spinbox.setValue(0.0)
         self.message_body_tree.clear()
@@ -123,39 +132,44 @@ class PropertyEditor(QWidget):
         self.wait_f_spinbox.setValue(0)
         self.wait_timeout_spinbox.setValue(10.0)
 
-        # 패널 및 버튼 가시성 제어
-        self.send_panel.show()
-        self.wait_panel.hide()
-        self.send_now_button.hide()
         self._is_internal_update = False
 
     @Slot(ScenarioStepItem)
     def display_step_properties(self, item: ScenarioStepItem):
+        """✅ [핵심 수정] 선택된 아이템의 속성을 표시합니다. 더 이상 clear_view()를 호출하지 않습니다."""
         self._is_internal_update = True
-        self.clear_view()
         self.current_item = item
+        self.current_manual_message = None
         data = item.step_data
 
-        # 1. 액션 타입 설정
-        if 'wait_recv' in data:
-            self.action_type_combo.setCurrentIndex(1) # Wait for Reply
-        else:
-            self.action_type_combo.setCurrentIndex(0) # Send Message
+        # --- UI 상태 설정 ---
+        self.action_type_combo.setEnabled(True)
+        self.device_id_combo.setEnabled(True)
+        self.delay_spinbox.setEnabled(True)
+        self.send_now_button.hide()
+        
+        is_wait = 'wait_recv' in data
+        self.wait_panel.setVisible(is_wait)
+        self.send_panel.setVisible(not is_wait)
+        self.delay_spinbox.setEnabled(not is_wait) # Wait 액션일 때는 Delay 비활성화
+        
+        self.action_type_combo.setCurrentIndex(1 if is_wait else 0)
 
-        # 2. 공통 필드 채우기
+        # --- 데이터 채우기 ---
         self._populate_common_fields(data)
 
-        # 3. 액션별 상세 필드 채우기
-        if 'wait_recv' in data:
+        if is_wait:
             self.wait_s_spinbox.setValue(data['wait_recv'].get('s', 0))
             self.wait_f_spinbox.setValue(data['wait_recv'].get('f', 0))
             self.wait_timeout_spinbox.setValue(data.get('timeout', 10.0))
-        
-        if 'message' in data:
+            self.message_body_tree.clear()
+        else: # Send 액션
             message_body = data.get('message', {}).get('body')
             if message_body is not None:
                 self._ensure_ids(message_body)
                 self._refresh_ui_from_model(message_body)
+            else:
+                self.message_body_tree.clear()
         
         self._is_internal_update = False
 
@@ -298,32 +312,36 @@ class PropertyEditor(QWidget):
     # --- Event Handlers / Slots ---
     @Slot(int)
     def on_action_type_changed(self, index):
-        """액션 타입 콤보박스 변경 시 UI와 데이터 모델을 업데이트합니다."""
+        """✅ [최종 수정] 액션 타입 양방향 전환 시 S/F 값을 모두 유지하도록 수정합니다."""
         if self._is_internal_update or not self.current_item: return
         
-        # UI 패널 가시성 전환
         is_wait_action = (index == 1)
         self.wait_panel.setVisible(is_wait_action)
         self.send_panel.setVisible(not is_wait_action)
         self.delay_spinbox.setEnabled(not is_wait_action)
 
-        # 데이터 모델 업데이트
-        if is_wait_action:
-            # 'Send' 관련 키를 삭제하고 'Wait' 키를 추가
+        if is_wait_action: # Send -> Wait
+            original_s = self.current_item.step_data.get('message', {}).get('s', 0)
+            original_f = self.current_item.step_data.get('message', {}).get('f', 0)
+
+            self.wait_s_spinbox.setValue(original_s)
+            self.wait_f_spinbox.setValue(original_f)
+
             self.current_item.step_data.pop('message', None)
             self.current_item.step_data.pop('message_id', None)
-            self.current_item.step_data['wait_recv'] = {
-                's': self.wait_s_spinbox.value(),
-                'f': self.wait_f_spinbox.value()
-            }
+            self.current_item.step_data['wait_recv'] = {'s': original_s, 'f': original_f}
             self.current_item.step_data['timeout'] = self.wait_timeout_spinbox.value()
-        else:
-            # 'Wait' 관련 키를 삭제하고 'Send' 키를 추가
+        else: # Wait -> Send
+            original_s = self.current_item.step_data.get('wait_recv', {}).get('s', 0)
+            original_f = self.current_item.step_data.get('wait_recv', {}).get('f', 0)
+            
             self.current_item.step_data.pop('wait_recv', None)
             self.current_item.step_data.pop('timeout', None)
-            # 기본 메시지 구조를 다시 만들어줌
-            self.current_item.step_data['message_id'] = "Custom Msg"
-            self.current_item.step_data['message'] = {'s': 0, 'f': 0, 'body': []}
+            
+            # message_id는 커스텀 메시지임을 명시하고, message 본문을 생성합니다.
+            self.current_item.step_data['message_id'] = f"Custom S{original_s}F{original_f}"
+            self.current_item.step_data['message'] = {'s': original_s, 'f': original_f, 'body': []}
+            
             self._refresh_ui_from_model(self.current_item.step_data['message']['body'])
 
         self.current_item.update_visuals()
@@ -383,3 +401,4 @@ class PropertyEditor(QWidget):
             QMessageBox.warning(self, "Send Error", "Please select a valid device.")
             return
         self.manual_send_requested.emit(device_id, self.current_manual_message)
+
