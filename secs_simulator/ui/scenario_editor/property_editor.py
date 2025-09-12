@@ -1,12 +1,13 @@
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QFormLayout, 
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QFormLayout,
                                QComboBox, QDoubleSpinBox, QTreeWidget, QTreeWidgetItem,
                                QPushButton, QMenu, QInputDialog, QMessageBox)
 from PySide6.QtCore import Slot, Qt, Signal
-from PySide6.QtGui import QAction
+import uuid
+import copy
 
 from .scenario_step_item import ScenarioStepItem
 from secs_simulator.engine.scenario_manager import ScenarioManager
-import copy
+
 
 class PropertyEditor(QWidget):
     """스텝 편집 및 수동 메시지 전송을 위한 속성 편집기입니다."""
@@ -55,7 +56,6 @@ class PropertyEditor(QWidget):
 
     # --- UI Mode Control ---
     def clear_view(self):
-        """뷰를 초기 상태로 리셋합니다."""
         self._is_internal_update = True
         self.current_item = None
         self.current_manual_message = None
@@ -69,7 +69,6 @@ class PropertyEditor(QWidget):
 
     @Slot(ScenarioStepItem)
     def display_step_properties(self, item: ScenarioStepItem):
-        """타임라인 스텝 편집 모드로 UI를 설정합니다."""
         self._is_internal_update = True
         self.current_item = item
         self.current_manual_message = None
@@ -82,7 +81,6 @@ class PropertyEditor(QWidget):
 
     @Slot(dict)
     def display_for_manual_send(self, message_data: dict):
-        """수동 메시지 전송 모드로 UI를 설정합니다."""
         self._is_internal_update = True
         self.current_item = None
         self.current_manual_message = copy.deepcopy(message_data.get("message"))
@@ -93,7 +91,6 @@ class PropertyEditor(QWidget):
         self._is_internal_update = False
     
     def _populate_common_fields(self, data_source: dict):
-        """두 모드에서 공통적으로 사용되는 UI 필드를 채웁니다."""
         device_type = data_source.get("device_type")
         self.device_id_combo.clear()
         available_devices = [dev_id for dev_id, conf in self.device_configs.items() if conf.get('type') == device_type]
@@ -108,7 +105,6 @@ class PropertyEditor(QWidget):
     
     # --- Data Model & UI Synchronization ---
     def _get_current_message_body(self) -> list | None:
-        """현재 편집 대상(스텝 또는 수동 메시지)의 body 리스트를 반환합니다."""
         if self.current_item:
             message = self.current_item.step_data.setdefault("message", {})
             return message.setdefault("body", [])
@@ -117,7 +113,6 @@ class PropertyEditor(QWidget):
         return None
 
     def _refresh_ui_from_model(self, message_body: list | None):
-        """주어진 데이터 모델을 기반으로 Tree View 전체를 다시 그립니다."""
         self._is_internal_update = True
         self.message_body_tree.clear()
         if message_body is not None:
@@ -126,11 +121,10 @@ class PropertyEditor(QWidget):
         self._is_internal_update = False
 
     def _populate_message_tree(self, parent_widget, data_list):
-        """데이터 모델을 기반으로 Tree 위젯을 재귀적으로 생성합니다."""
         for item_data in data_list:
-            item_type, val = item_data.get('type'), item_data.get('value')
             tree_item = QTreeWidgetItem(parent_widget)
             tree_item.setData(0, Qt.ItemDataRole.UserRole, item_data)
+            item_type, val = item_data.get('type'), item_data.get('value')
             if item_type == 'L':
                 tree_item.setText(0, f"L[{len(val)}]")
                 self._populate_message_tree(tree_item, val)
@@ -142,7 +136,6 @@ class PropertyEditor(QWidget):
     # --- Context Menu Actions ---
     @Slot(object)
     def _show_context_menu(self, position):
-        """Tree 위젯에서 우클릭 시 컨텍스트 메뉴를 표시합니다."""
         menu = QMenu()
         selected_item = self.message_body_tree.currentItem()
 
@@ -158,33 +151,57 @@ class PropertyEditor(QWidget):
         
         menu.exec(self.message_body_tree.mapToGlobal(position))
 
+    def _find_item_by_id(self, data_list, target_id):
+        """body 리스트 안에서 id로 항목을 찾아 반환 (재귀 탐색)."""
+        for item in data_list:
+            if item.get('id') == target_id:
+                return item
+            if item.get('type') == 'L' and isinstance(item.get('value'), list):
+                found = self._find_item_by_id(item['value'], target_id)
+                if found:
+                    return found
+        return None
+
     def _add_item_action(self, selected_item: QTreeWidgetItem | None):
         SECS_TYPES = ['L', 'A', 'B', 'U1', 'U2', 'U4', 'I1', 'I2', 'I4', 'F4', 'F8', 'BOOL']
-        item_type, ok = QInputDialog.getItem(self, "Add SECS Item", "Select item type:", SECS_TYPES, 0, False)
-        if not ok: return
+        item_type, ok = QInputDialog.getItem(
+            self, "Add SECS Item", "Select item type:", SECS_TYPES, 0, False
+        )
+        if not ok:
+            return
 
-        new_item_data = {'type': item_type, 'value': [] if item_type == 'L' else 0 if item_type not in ['A', 'B'] else ''}
+        new_item_data = {
+            'id': str(uuid.uuid4()),
+            'type': item_type,
+            'value': [] if item_type == 'L' else ('' if item_type in ['A', 'B'] else 0)
+        }
 
-        target_list = None
+        target_list = self._get_current_message_body()
+
         if selected_item:
             selected_data = selected_item.data(0, Qt.ItemDataRole.UserRole)
-            
-            if selected_data and selected_data.get('type') == 'L':
-                target_list = selected_data.get('value')
-            else:
-                parent = selected_item.parent()
-                if parent:
-                    parent_data = parent.data(0, Qt.ItemDataRole.UserRole)
-                    if parent_data and parent_data.get('type') == 'L':
-                        target_list = parent_data.get('value')
-
-        if target_list is None:
-            target_list = self._get_current_message_body()
+            if selected_data:
+                # ✅ id로 모델 내 실제 객체 찾기
+                root_list = self._get_current_message_body()
+                real_data = self._find_item_by_id(root_list, selected_data.get('id'))
+                
+                if real_data and real_data.get('type') == 'L':
+                    target_list = real_data['value']
+                else:
+                    parent_item = selected_item.parent()
+                    if parent_item:
+                        parent_data = parent_item.data(0, Qt.ItemDataRole.UserRole)
+                        if parent_data:
+                            real_parent = self._find_item_by_id(root_list, parent_data.get('id'))
+                            if real_parent and real_parent.get('type') == 'L':
+                                target_list = real_parent['value']
 
         if target_list is not None:
             target_list.append(new_item_data)
-        
+
         self._sync_model_and_views()
+
+
 
     def _remove_item_action(self, selected_item: QTreeWidgetItem):
         reply = QMessageBox.question(self, "Confirm Removal",
@@ -194,16 +211,20 @@ class PropertyEditor(QWidget):
         if reply == QMessageBox.StandardButton.No: return
 
         selected_data = selected_item.data(0, Qt.ItemDataRole.UserRole)
+        if not selected_data:
+            return
+        
+        target_list = None
         parent_item = selected_item.parent()
-
         if parent_item:
             parent_data = parent_item.data(0, Qt.ItemDataRole.UserRole)
             if parent_data and parent_data.get('type') == 'L':
-                parent_data.get('value', []).remove(selected_data)
+                target_list = parent_data.get('value')
         else:
-            message_body = self._get_current_message_body()
-            if message_body is not None:
-                message_body.remove(selected_data)
+            target_list = self._get_current_message_body()
+        
+        if target_list is not None:
+            target_list[:] = [x for x in target_list if x.get('id') != selected_data.get('id')]
 
         self._sync_model_and_views()
 
@@ -230,33 +251,36 @@ class PropertyEditor(QWidget):
         self._sync_model_and_views()
     
     def _sync_model_and_views(self):
-        """모델 변경 후 UI와 타임라인을 동기화하는 헬퍼 함수입니다."""
         self._refresh_ui_from_model(self._get_current_message_body())
         if self.current_item:
-            # ✅ [핵심 수정] update() 대신 새로 만든 update_visuals()를 호출합니다.
             self.current_item.update_visuals()
-
 
     # --- Event Handlers / Slots ---
     @Slot(QTreeWidgetItem, int)
     def on_message_body_item_changed(self, item: QTreeWidgetItem, column: int):
-        if self._is_internal_update or column != 1: return
+        if self._is_internal_update or column != 1:
+            return
         item_data = item.data(0, Qt.ItemDataRole.UserRole)
-        if not item_data or item_data.get('type') == 'L': return
+        if not item_data or item_data.get('type') == 'L':
+            return
 
         new_value_str, item_type = item.text(1), item_data.get('type')
         current_value = item_data.get('value')
         
         try:
             new_value = current_value
-            if item_type in ['A', 'B']: new_value = new_value_str
-            elif item_type in ['U1', 'U2', 'U4', 'I1', 'I2', 'I4']: new_value = int(new_value_str)
-            elif item_type in ['F4', 'F8']: new_value = float(new_value_str)
-            elif item_type == 'BOOL': new_value_str.lower() in ['true', '1', 't', 'y', 'yes']
+            if item_type in ['A', 'B']:
+                new_value = new_value_str
+            elif item_type in ['U1', 'U2', 'U4', 'I1', 'I2', 'I4']:
+                new_value = int(new_value_str)
+            elif item_type in ['F4', 'F8']:
+                new_value = float(new_value_str)
+            elif item_type == 'BOOL':
+                new_value = new_value_str.lower() in ['true', '1', 't', 'y', 'yes']
             
             if new_value != current_value:
                 item_data['value'] = new_value
-                self._sync_model_and_views() # 값 변경 시에도 동기화
+                self._sync_model_and_views()
         except (ValueError, TypeError):
             self._is_internal_update = True
             item.setText(1, str(current_value))
@@ -264,13 +288,15 @@ class PropertyEditor(QWidget):
 
     @Slot(str)
     def on_device_id_changed(self, text: str):
-        if self._is_internal_update or not self.current_item: return
+        if self._is_internal_update or not self.current_item:
+            return
         self.current_item.step_data['device_id'] = text
         self.current_item.update_visuals()
 
     @Slot(float)
     def on_delay_changed(self, value: float):
-        if self._is_internal_update or not self.current_item: return
+        if self._is_internal_update or not self.current_item:
+            return
         self.current_item.step_data['delay'] = value
         self.current_item.update_visuals()
 

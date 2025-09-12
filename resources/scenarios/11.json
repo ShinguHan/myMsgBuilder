@@ -2,14 +2,9 @@
     "name": "VisualEditorScenario",
     "steps": [
         {
-            "device_id": "STK_01",
+            "device_id": "Select Device...",
             "delay": 0.0,
             "message_id": "S5F1_AlarmReport"
-        },
-        {
-            "device_id": "STK_01",
-            "delay": 0.0,
-            "message_id": "S1F1_AreYouThere"
         }
     ]
 }
