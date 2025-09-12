@@ -383,4 +383,3 @@ class PropertyEditor(QWidget):
             QMessageBox.warning(self, "Send Error", "Please select a valid device.")
             return
         self.manual_send_requested.emit(device_id, self.current_manual_message)
-

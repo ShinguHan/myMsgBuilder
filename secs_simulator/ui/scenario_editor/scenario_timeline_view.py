@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QGraphicsView, QGraphicsScene
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import Signal, Qt, Slot
 from PySide6.QtGui import QKeyEvent, QBrush, QColor, QPainter
 import copy
 import uuid
@@ -25,12 +25,31 @@ class ScenarioTimelineView(QGraphicsView):
         # --- UX 개선 ---
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.setBackgroundBrush(QBrush(QColor("#2D2D2D")))
-        self.setDragMode(QGraphicsView.DragMode.RubberBandDrag) # 드래그로 다중 선택 가능
+        self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
+
+        # ✅ [최종 수정] Scene의 내장 selectionChanged 신호를 직접 슬롯에 연결합니다.
+        # 이것이 아이템 선택을 감지하는 가장 확실한 방법입니다.
+        self.scene.selectionChanged.connect(self._on_selection_changed)
+
+    @Slot()
+    def _on_selection_changed(self):
+        """✅ [최종 수정] Scene에서 선택된 아이템이 변경될 때 호출되는 슬롯."""
+        selected_items = self.scene.selectedItems()
+        
+        # 오직 하나의 아이템만 선택되었을 경우에만 속성 편집기에 정보를 표시합니다.
+        if len(selected_items) == 1:
+            item = selected_items[0]
+            if isinstance(item, ScenarioStepItem):
+                self.step_selected.emit(item)
+        else:
+            # 여러 개가 선택되거나 아무것도 선택되지 않으면 속성 편집기를 비웁니다.
+            self.step_deleted.emit()
 
     def _create_step_item(self, step_data: dict) -> ScenarioStepItem:
         """ScenarioStepItem을 생성하고 필요한 신호를 연결하는 헬퍼 함수입니다."""
         item = ScenarioStepItem(step_data)
-        item.signals.selected.connect(self.step_selected)
+        # ❌ 이전의 잘못된 연결 코드를 제거합니다. Scene의 selectionChanged가 이 역할을 대신합니다.
+        # item.signals.selected.connect(self.step_selected.emit) 
         item.signals.position_changed.connect(self._rearrange_items)
         return item
 
@@ -45,7 +64,6 @@ class ScenarioTimelineView(QGraphicsView):
             item.setPos(10, y_pos)
             y_pos += item.boundingRect().height() + 10
         
-        # 스크롤바가 올바르게 동작하도록 씬의 영역을 업데이트합니다.
         self.setSceneRect(self.scene.itemsBoundingRect())
 
     def _assign_new_ids_recursive(self, data_list: list):
@@ -66,7 +84,8 @@ class ScenarioTimelineView(QGraphicsView):
                 self.scene.removeItem(item)
             
             self._rearrange_items()
-            self.step_deleted.emit()
+            # ✅ self.step_deleted.emit()을 여기서 호출할 필요 없습니다.
+            # removeItem에 의해 selectionChanged가 자동으로 발생하여 처리됩니다.
 
         elif event.key() == Qt.Key.Key_D and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
             selected_items = self.scene.selectedItems()
@@ -76,25 +95,24 @@ class ScenarioTimelineView(QGraphicsView):
             new_items = []
             for item in selected_items:
                 new_step_data = copy.deepcopy(item.step_data)
+                new_step_data['id'] = str(uuid.uuid4())
                 if 'message' in new_step_data and 'body' in new_step_data['message']:
                     self._assign_new_ids_recursive(new_step_data['message']['body'])
                 
                 new_item = self._create_step_item(new_step_data)
                 self.scene.addItem(new_item)
-                # 복제된 아이템을 원본 바로 아래에 위치시킵니다. (정렬 전 임시 위치)
                 new_item.setPos(10, item.y() + item.boundingRect().height() + 15)
                 new_items.append(new_item)
 
             self._rearrange_items()
 
-            # 기존 선택을 해제하고 새로 복제된 아이템들을 선택합니다.
             for item in selected_items:
                 item.setSelected(False)
             for item in new_items:
                 item.setSelected(True)
             
             if new_items:
-                self.ensureVisible(new_items[-1]) # 마지막으로 복제된 아이템이 보이도록 스크롤
+                self.ensureVisible(new_items[-1])
         
         else:
             super().keyPressEvent(event)
@@ -128,39 +146,41 @@ class ScenarioTimelineView(QGraphicsView):
         
         item = self._create_step_item(step_data)
         
-        # 드롭된 위치에 아이템을 임시로 놓습니다.
         drop_pos = self.mapToScene(event.pos())
         item.setPos(10, drop_pos.y())
         
         self.scene.addItem(item)
         
-        self._rearrange_items() # 즉시 전체 재정렬
-        self.ensureVisible(item) # 추가된 아이템이 보이도록 스크롤
+        self._rearrange_items()
+        self.ensureVisible(item)
 
         event.acceptProposedAction()
 
     def load_from_scenario_data(self, scenario_data: dict):
         self.scene.clear()
-        self.property_editor.clear_view()
-
+        
         manager = self.scenario_manager
         for step_data in scenario_data.get("steps", []):
-            # message가 통째로 저장된 경우
-            if "message" in step_data:
-                full_step_data = copy.deepcopy(step_data)
-            # message_id만 저장된 경우 (하위 호환성)
-            elif "message_id" in step_data:
-                device_id = step_data.get("device_id")
-                message_id = step_data.get("message_id")
-                if not all([device_id, message_id]): continue
+            full_step_data = copy.deepcopy(step_data)
+            
+            if 'device_type' not in full_step_data:
+                 device_id = full_step_data.get("device_id")
+                 if device_id:
+                     full_step_data['device_type'] = manager.get_device_type(device_id)
 
+            if 'wait_recv' in full_step_data or 'message' in full_step_data:
+                pass
+            elif "message_id" in full_step_data:
+                device_id = full_step_data.get("device_id")
+                message_id = full_step_data.get("message_id")
                 device_type = manager.get_device_type(device_id)
-                if not device_type: continue
-
-                message_body = manager.get_message_body(device_type, message_id)
-                if not message_body: continue
                 
-                full_step_data = {**step_data, "message": message_body, "device_type": device_type}
+                if device_type and message_id:
+                    message_body = manager.get_message_body(device_type, message_id)
+                    if message_body:
+                        full_step_data['message'] = message_body
+                    else: continue
+                else: continue
             else:
                 continue
 
@@ -168,4 +188,3 @@ class ScenarioTimelineView(QGraphicsView):
             self.scene.addItem(item)
             
         self._rearrange_items()
-

@@ -1,0 +1,15 @@
+{
+    "name": "VisualEditorScenario",
+    "steps": [
+        {
+            "device_id": "STK_01",
+            "delay": 0.0,
+            "id": "69620b16-75bd-4d30-8c43-c7e70f20bdb2",
+            "wait_recv": {
+                "s": 0,
+                "f": 0
+            },
+            "timeout": 10.0
+        }
+    ]
+}

@@ -1,3 +1,5 @@
+# secs_simulator/ui/scenario_editor/scenario_editor_widget.py
+
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QSplitter
 from PySide6.QtCore import Qt, Signal
 import copy
@@ -34,13 +36,12 @@ class ScenarioEditorWidget(QWidget):
 
         # --- 시그널-슬롯 연결 ---
         self.timeline_view.step_selected.connect(self.property_editor.display_step_properties)
-        # ✅ [기능 추가] 스텝 삭제 신호를 속성 편집기 클리어 슬롯에 연결
         self.timeline_view.step_deleted.connect(self.property_editor.clear_view)
         self.library_view.message_selected.connect(self.property_editor.display_for_manual_send)
         self.property_editor.manual_send_requested.connect(self.manual_send_requested)
     
     def export_to_scenario_data(self) -> dict:
-        """현재 타임라인을 실행 가능한 JSON 데이터로 변환합니다."""
+        """✅ [핵심 수정] 현재 타임라인을 실행 가능한 JSON 데이터로 변환합니다."""
         steps = []
         # QGraphicsScene.items()는 정렬 순서를 보장하지 않으므로 y좌표로 정렬합니다.
         sorted_items = sorted(
@@ -49,13 +50,9 @@ class ScenarioEditorWidget(QWidget):
         )
         
         for item in sorted_items:
-            # 실행에 필요한 최소한의 데이터만 포함시킵니다.
-            clean_data = {
-                "device_id": item.step_data.get("device_id"),
-                "delay": item.step_data.get("delay", 0.0),
-                "message": item.step_data.get("message")
-            }
-            steps.append(clean_data)
+            # 'wait_recv'를 포함한 모든 데이터를 그대로 복사하여 전달합니다.
+            # 이렇게 해야 Orchestrator가 'wait' 액션을 인지할 수 있습니다.
+            steps.append(copy.deepcopy(item.step_data))
         
         return {"name": "VisualEditorScenario", "steps": steps}
 
@@ -102,33 +99,43 @@ class ScenarioEditorWidget(QWidget):
             device_id = step_data.get("device_id")
             message_id = step_data.get("message_id")
             
+            # ✅ 'wait_recv' 스텝을 올바르게 로드하기 위해 로직을 명확히 합니다.
+            # 'wait_recv'가 있으면 device_id만 있어도 유효한 스텝입니다.
             if not device_id:
                 continue
 
-            # 로드된 데이터에 'message' 객체가 있는지 확인합니다.
-            if 'message' in step_data:
-                message_body = step_data['message']
-            # 없다면, message_id로 라이브러리에서 가져옵니다.
-            elif message_id:
-                device_type = manager.get_device_type(device_id)
-                if device_type:
-                    message_body = manager.get_message_body(device_type, message_id)
+            # 'wait_recv'가 없는 'send' 스텝의 경우에만 메시지를 찾습니다.
+            if 'wait_recv' not in step_data:
+                # 로드된 데이터에 'message' 객체가 있는지 확인합니다.
+                if 'message' in step_data:
+                    message_body = step_data['message']
+                # 없다면, message_id로 라이브러리에서 가져옵니다.
+                elif message_id:
+                    device_type = manager.get_device_type(device_id)
+                    if device_type:
+                        message_body = manager.get_message_body(device_type, message_id)
+                    else:
+                        message_body = None
                 else:
-                    message_body = None
-            else:
-                continue
-            
-            if not message_body:
-                continue
-            
-            # 타임라인 아이템 생성을 위한 완전한 데이터 구성
-            full_step_data = {
-                "device_id": device_id,
-                "delay": step_data.get("delay", 0.0),
-                "message_id": message_id,
-                "message": message_body,
-                "device_type": manager.get_device_type(device_id)
-            }
+                    continue
+                
+                if not message_body:
+                    continue
+                
+                # 타임라인 아이템 생성을 위한 완전한 데이터 구성
+                full_step_data = {
+                    "device_id": device_id,
+                    "delay": step_data.get("delay", 0.0),
+                    "message_id": message_id,
+                    "message": message_body,
+                    "device_type": manager.get_device_type(device_id)
+                }
+            else: # 'wait_recv' 스텝은 그대로 사용합니다.
+                full_step_data = step_data
+                # device_type이 없을 수 있으므로 추가해줍니다.
+                if 'device_type' not in full_step_data:
+                    full_step_data['device_type'] = manager.get_device_type(device_id)
+
 
             item = ScenarioStepItem(full_step_data)
             item.signals.selected.connect(self.timeline_view.step_selected)
