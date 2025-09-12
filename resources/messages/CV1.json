@@ -1,0 +1,22 @@
+{
+    "S1F1_AreYouThere": {
+        "s": 1,
+        "f": 1,
+        "w_bit": true,
+        "body": []
+    },
+    "S2F41_HostCommand_START": {
+        "s": 2,
+        "f": 41,
+        "w_bit": true,
+        "body": [
+            {
+                "type": "L",
+                "value": [
+                    { "type": "A", "value": "START" },
+                    { "type": "L", "value": [] }
+                ]
+            }
+        ]
+    }
+}
