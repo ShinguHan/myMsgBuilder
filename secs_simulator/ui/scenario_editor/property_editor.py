@@ -48,7 +48,6 @@ class PropertyEditor(QWidget):
         self.send_now_button.clicked.connect(self.on_send_now_clicked)
         self.message_body_tree.itemChanged.connect(self.on_message_body_item_changed)
 
-        # ✅ [기능 추가] 우클릭 컨텍스트 메뉴를 위한 설정
         self.message_body_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.message_body_tree.customContextMenuRequested.connect(self._show_context_menu)
         
@@ -86,7 +85,6 @@ class PropertyEditor(QWidget):
         """수동 메시지 전송 모드로 UI를 설정합니다."""
         self._is_internal_update = True
         self.current_item = None
-        # ✅ 수동 전송 시 원본 라이브러리 메시지가 수정되지 않도록 깊은 복사 사용
         self.current_manual_message = copy.deepcopy(message_data.get("message"))
         self.form_layout.labelForField(self.delay_spinbox).hide()
         self.delay_spinbox.hide()
@@ -112,9 +110,10 @@ class PropertyEditor(QWidget):
     def _get_current_message_body(self) -> list | None:
         """현재 편집 대상(스텝 또는 수동 메시지)의 body 리스트를 반환합니다."""
         if self.current_item:
-            return self.current_item.step_data.get("message", {}).get("body")
+            message = self.current_item.step_data.setdefault("message", {})
+            return message.setdefault("body", [])
         if self.current_manual_message:
-            return self.current_manual_message.get("body")
+            return self.current_manual_message.setdefault("body", [])
         return None
 
     def _refresh_ui_from_model(self, message_body: list | None):
@@ -144,96 +143,120 @@ class PropertyEditor(QWidget):
     @Slot(object)
     def _show_context_menu(self, position):
         """Tree 위젯에서 우클릭 시 컨텍스트 메뉴를 표시합니다."""
-        selected_item = self.message_body_tree.currentItem()
-        if not selected_item: return
-
         menu = QMenu()
-        # 'L' 타입이거나, 부모가 'L' 타입인 경우에만 아이템 추가/삭제 가능
-        can_add = selected_item.data(0, Qt.ItemDataRole.UserRole).get('type') == 'L'
-        can_remove = selected_item.parent() is not None
+        selected_item = self.message_body_tree.currentItem()
 
-        if can_add:
-            add_action = menu.addAction("Add New Item")
-            add_action.triggered.connect(lambda: self._add_item_action(selected_item))
-        
-        if can_remove:
+        add_action = menu.addAction("Add New Item")
+        add_action.triggered.connect(lambda: self._add_item_action(selected_item))
+
+        if selected_item:
             remove_action = menu.addAction("Remove Selected Item")
             remove_action.triggered.connect(lambda: self._remove_item_action(selected_item))
-        
-        change_type_action = menu.addAction("Change Type")
-        change_type_action.triggered.connect(lambda: self._change_type_action(selected_item))
+            
+            change_type_action = menu.addAction("Change Type")
+            change_type_action.triggered.connect(lambda: self._change_type_action(selected_item))
         
         menu.exec(self.message_body_tree.mapToGlobal(position))
 
-    def _add_item_action(self, selected_item: QTreeWidgetItem):
-        """'아이템 추가' 액션을 처리합니다."""
-        item_data = selected_item.data(0, Qt.ItemDataRole.UserRole)
-        if item_data.get('type') != 'L': return
-
+    def _add_item_action(self, selected_item: QTreeWidgetItem | None):
         SECS_TYPES = ['L', 'A', 'B', 'U1', 'U2', 'U4', 'I1', 'I2', 'I4', 'F4', 'F8', 'BOOL']
         item_type, ok = QInputDialog.getItem(self, "Add SECS Item", "Select item type:", SECS_TYPES, 0, False)
         if not ok: return
 
-        new_item_data = {'type': item_type, 'value': [] if item_type == 'L' else 0 if item_type != 'A' else ''}
-        item_data['value'].append(new_item_data)
+        new_item_data = {'type': item_type, 'value': [] if item_type == 'L' else 0 if item_type not in ['A', 'B'] else ''}
+
+        target_list = None
+        if selected_item:
+            selected_data = selected_item.data(0, Qt.ItemDataRole.UserRole)
+            
+            if selected_data and selected_data.get('type') == 'L':
+                target_list = selected_data.get('value')
+            else:
+                parent = selected_item.parent()
+                if parent:
+                    parent_data = parent.data(0, Qt.ItemDataRole.UserRole)
+                    if parent_data and parent_data.get('type') == 'L':
+                        target_list = parent_data.get('value')
+
+        if target_list is None:
+            target_list = self._get_current_message_body()
+
+        if target_list is not None:
+            target_list.append(new_item_data)
         
-        self._refresh_ui_from_model(self._get_current_message_body())
-        if self.current_item: self.current_item.update()
+        self._sync_model_and_views()
 
     def _remove_item_action(self, selected_item: QTreeWidgetItem):
-        """'아이템 삭제' 액션을 처리합니다."""
-        parent_item = selected_item.parent()
-        if not parent_item:
-            QMessageBox.warning(self, "Action Denied", "Cannot remove the root message body.")
-            return
-
         reply = QMessageBox.question(self, "Confirm Removal",
-                                     f"Are you sure you want to remove this item?",
+                                     "Are you sure you want to remove this item and all its children?",
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                                      QMessageBox.StandardButton.No)
         if reply == QMessageBox.StandardButton.No: return
 
-        parent_data = parent_item.data(0, Qt.ItemDataRole.UserRole)
         selected_data = selected_item.data(0, Qt.ItemDataRole.UserRole)
-        
-        if parent_data and parent_data.get('type') == 'L' and selected_data in parent_data.get('value', []):
-            parent_data['value'].remove(selected_data)
-            self._refresh_ui_from_model(self._get_current_message_body())
-            if self.current_item: self.current_item.update()
+        parent_item = selected_item.parent()
+
+        if parent_item:
+            parent_data = parent_item.data(0, Qt.ItemDataRole.UserRole)
+            if parent_data and parent_data.get('type') == 'L':
+                parent_data.get('value', []).remove(selected_data)
+        else:
+            message_body = self._get_current_message_body()
+            if message_body is not None:
+                message_body.remove(selected_data)
+
+        self._sync_model_and_views()
 
     def _change_type_action(self, selected_item: QTreeWidgetItem):
-        """'타입 변경' 액션을 처리합니다."""
         item_data = selected_item.data(0, Qt.ItemDataRole.UserRole)
         if not item_data: return
 
         SECS_TYPES = ['L', 'A', 'B', 'U1', 'U2', 'U4', 'I1', 'I2', 'I4', 'F4', 'F8', 'BOOL']
-        new_type, ok = QInputDialog.getItem(self, "Change Item Type", "Select new type:", SECS_TYPES, 0, False)
+        current_type_index = SECS_TYPES.index(item_data.get('type')) if item_data.get('type') in SECS_TYPES else 0
+        new_type, ok = QInputDialog.getItem(self, "Change Item Type", "Select new type:", SECS_TYPES, current_type_index, False)
+        
         if not ok or new_type == item_data.get('type'): return
 
         item_data['type'] = new_type
-        item_data['value'] = [] if new_type == 'L' else 0 if new_type not in ['A','B'] else ''
+        if new_type == 'L':
+            item_data['value'] = []
+        elif new_type in ['A', 'B']:
+            item_data['value'] = ''
+        elif new_type == 'BOOL':
+            item_data['value'] = False
+        else:
+            item_data['value'] = 0
         
+        self._sync_model_and_views()
+    
+    def _sync_model_and_views(self):
+        """모델 변경 후 UI와 타임라인을 동기화하는 헬퍼 함수입니다."""
         self._refresh_ui_from_model(self._get_current_message_body())
-        if self.current_item: self.current_item.update()
+        if self.current_item:
+            # ✅ [핵심 수정] update() 대신 새로 만든 update_visuals()를 호출합니다.
+            self.current_item.update_visuals()
+
 
     # --- Event Handlers / Slots ---
     @Slot(QTreeWidgetItem, int)
     def on_message_body_item_changed(self, item: QTreeWidgetItem, column: int):
-        """사용자가 Tree의 값을 수정했을 때 데이터 모델을 업데이트합니다."""
         if self._is_internal_update or column != 1: return
         item_data = item.data(0, Qt.ItemDataRole.UserRole)
-        if not item_data: return
+        if not item_data or item_data.get('type') == 'L': return
 
         new_value_str, item_type = item.text(1), item_data.get('type')
-        current_value, new_value = item_data.get('value'), item_data.get('value')
+        current_value = item_data.get('value')
+        
         try:
+            new_value = current_value
             if item_type in ['A', 'B']: new_value = new_value_str
             elif item_type in ['U1', 'U2', 'U4', 'I1', 'I2', 'I4']: new_value = int(new_value_str)
             elif item_type in ['F4', 'F8']: new_value = float(new_value_str)
-            elif item_type == 'BOOL': new_value = new_value_str.lower() in ['true', '1', 't', 'y', 'yes']
+            elif item_type == 'BOOL': new_value_str.lower() in ['true', '1', 't', 'y', 'yes']
             
-            item_data['value'] = new_value
-            if self.current_item: self.current_item.update()
+            if new_value != current_value:
+                item_data['value'] = new_value
+                self._sync_model_and_views() # 값 변경 시에도 동기화
         except (ValueError, TypeError):
             self._is_internal_update = True
             item.setText(1, str(current_value))
@@ -243,18 +266,18 @@ class PropertyEditor(QWidget):
     def on_device_id_changed(self, text: str):
         if self._is_internal_update or not self.current_item: return
         self.current_item.step_data['device_id'] = text
-        self.current_item.update()
+        self.current_item.update_visuals()
 
     @Slot(float)
     def on_delay_changed(self, value: float):
         if self._is_internal_update or not self.current_item: return
         self.current_item.step_data['delay'] = value
-        self.current_item.update()
+        self.current_item.update_visuals()
 
     @Slot()
     def on_send_now_clicked(self):
-        """수동 전송 버튼 클릭 시 편집된 메시지 내용을 전송합니다."""
         device_id = self.device_id_combo.currentText()
         if not device_id or not self.current_manual_message:
+            QMessageBox.warning(self, "Send Error", "Please select a valid device.")
             return
         self.manual_send_requested.emit(device_id, self.current_manual_message)

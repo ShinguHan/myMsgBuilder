@@ -22,15 +22,54 @@ class ScenarioStepItem(QGraphicsItem):
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
         
-        # ✅ 더 많은 정보를 표시하기 위해 높이를 90으로 늘립니다.
         self.width = 220
-        self.height = 90
+        self.height = 100 # 초기 높이
+        
+        # 생성 시점의 데이터로 첫 높이를 계산합니다.
+        self._calculate_height()
 
     def boundingRect(self) -> QRectF:
+        """이 아이템이 차지하는 영역을 시스템에 알립니다."""
         return QRectF(0, 0, self.width, self.height)
 
+    def _calculate_height(self):
+        """
+        현재 데이터에 기반하여 아이템의 정확한 높이를 계산합니다.
+        """
+        doc = QTextDocument()
+        doc.setHtml(self._generate_html())
+        doc.setTextWidth(self.width - 20)
+        self.height = doc.size().height() + 10
+
+    def _generate_html(self) -> str:
+        """현재 데이터로 표시할 HTML을 생성합니다."""
+        device_id = self.step_data.get('device_id', 'Select Device...')
+        message_id = self.step_data.get('message_id', 'N/A')
+        delay = self.step_data.get('delay', 0.0)
+
+        body_preview = ""
+        message = self.step_data.get("message", {})
+        if isinstance(message, dict) and "body" in message and message["body"]:
+            try:
+                # 가독성을 위해 indent를 2로 설정
+                body_str = json.dumps(message["body"], indent=2)
+                # 미리보기 길이를 늘려서 더 많은 정보를 표시
+                body_preview = (body_str[:150] + '...') if len(body_str) > 150 else body_str
+            except TypeError:
+                body_preview = "Invalid body structure"
+        
+        # HTML 태그의 오타를 수정하고 pre 태그로 감싸서 공백을 유지합니다.
+        return f"""
+        <div style='color: #E0E0E0; padding: 2px;'>
+            <b style='font-size: 14px;'>{device_id}</b><br>
+            <span style='color: #AAAAAA; font-size: 12px;'>Msg: {message_id}</span><br>
+            <span style='color: #FFCC00; font-size: 12px;'>Delay: {delay:.1f}s</span>
+            <pre style='color: #77DD77; font-size: 10px; margin: 0; font-family: Courier New;'>{body_preview}</pre>
+        </div>
+        """
+
     def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem, widget: QWidget = None):
-        """✅ Device ID, Message ID, Delay, Body Preview를 모두 그립니다."""
+        """아이템을 화면에 그립니다."""
         rect = self.boundingRect()
         
         if self.isSelected():
@@ -44,43 +83,31 @@ class ScenarioStepItem(QGraphicsItem):
         painter.setPen(pen)
         painter.setBrush(brush)
         painter.drawRoundedRect(rect, 8.0, 8.0)
-
-        painter.save()
         
-        # 데이터 모델에서 최신 정보를 가져옵니다.
-        device_id = self.step_data.get('device_id', 'Select Device...')
-        message_id = self.step_data.get('message_id', 'N/A')
-        delay = self.step_data.get('delay', 0.0)
-
-        # message body 요약 (JSON 형식으로 간단히 표시)
-        body_preview = ""
-        message = self.step_data.get("message", {})
-        if isinstance(message, dict) and "body" in message and message["body"]:
-            try:
-                # json.dumps를 사용해 좀 더 깔끔하게 표현
-                body_str = json.dumps(message["body"])
-                body_preview = (body_str[:35] + '...') if len(body_str) > 35 else body_str
-            except TypeError:
-                body_preview = "Invalid body structure"
-        
-        html_text = f"""
-        <div style='color: #E0E0E0; padding: 2px;'>
-            <b style='font-size: 14px;'>{device_id}</b>
-            <p style='color: #AAAAAA; font-size: 12px; margin: 0;'>Msg: {message_id}</p>
-            <p style='color: #FFCC00; font-size: 12px; margin: 0;'>Delay: {delay:.1f}s</p>
-            <p style='color: #77DD77; font-size: 10px; margin: 0; font-family: Courier New;'>{body_preview}</p>
-        </div>
-        """
-
         doc = QTextDocument()
-        doc.setHtml(html_text)
+        doc.setHtml(self._generate_html())
         doc.setTextWidth(self.width - 20)
-
+        
         painter.translate(10, 5)
         doc.drawContents(painter)
-
-        painter.restore()
 
     def mousePressEvent(self, event):
         super().mousePressEvent(event)
         self.signals.selected.emit(self)
+
+    def update_visuals(self):
+        """
+        [핵심 수정]
+        데이터 변경 후 외부에서 호출하는 공식 업데이트 메서드입니다.
+        예제 코드의 로직과 동일한 순서로 실행됩니다.
+        """
+        # 1. 시스템에 아이템의 크기가 곧 변경될 것임을 '미리' 알립니다.
+        self.prepareGeometryChange()
+        
+        # 2. 새로운 데이터에 맞춰 자신의 높이를 다시 계산합니다.
+        # (데이터 자체는 property_editor에서 이미 변경된 상태입니다)
+        self._calculate_height()
+        
+        # 3. 화면을 다시 그리도록 요청합니다. (paint 호출)
+        self.update()
+
