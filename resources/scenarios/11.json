@@ -4,6 +4,57 @@
         {
             "device_id": "STK_01",
             "delay": 0.0,
+            "message_id": "S1F1_AreYouThere",
+            "message": {
+                "s": 1,
+                "f": 1,
+                "w_bit": true,
+                "body": []
+            }
+        },
+        {
+            "device_id": "STK_01",
+            "delay": 0.0,
+            "message_id": "S1F1_AreYouThere",
+            "message": {
+                "s": 1,
+                "f": 1,
+                "w_bit": true,
+                "body": []
+            }
+        },
+        {
+            "device_id": "STK_01",
+            "delay": 0.0,
+            "message_id": "S5F1_AlarmReport",
+            "message": {
+                "s": 5,
+                "f": 1,
+                "w_bit": true,
+                "body": [
+                    {
+                        "type": "L",
+                        "value": [
+                            {
+                                "type": "B",
+                                "value": 1
+                            },
+                            {
+                                "type": "U4",
+                                "value": 1001
+                            },
+                            {
+                                "type": "L",
+                                "value": []
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+        {
+            "device_id": "STK_01",
+            "delay": 0.0,
             "message_id": "S5F1_AlarmReport",
             "message": {
                 "s": 5,
@@ -24,6 +75,17 @@
                         ]
                     }
                 ]
+            }
+        },
+        {
+            "device_id": "STK_01",
+            "delay": 0.0,
+            "message_id": "S1F1_AreYouThere",
+            "message": {
+                "s": 1,
+                "f": 1,
+                "w_bit": true,
+                "body": []
             }
         }
     ]

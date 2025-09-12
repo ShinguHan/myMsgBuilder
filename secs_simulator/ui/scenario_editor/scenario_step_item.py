@@ -41,6 +41,12 @@ class ScenarioStepItem(QGraphicsItem):
         doc.setTextWidth(self.width - 20)
         self.height = doc.size().height() + 10
 
+    # ✅ [기능 추가] 사용자가 아이템을 움직인 후 마우스를 놓으면 신호를 보냅니다.
+    def mouseReleaseEvent(self, event):
+        """마우스 버튼을 놓았을 때, 위치 변경이 완료되었음을 알립니다."""
+        super().mouseReleaseEvent(event)
+        self.signals.position_changed.emit()
+
     def _generate_html(self) -> str:
         """현재 데이터로 표시할 HTML을 생성합니다."""
         device_id = self.step_data.get('device_id', 'Select Device...')
