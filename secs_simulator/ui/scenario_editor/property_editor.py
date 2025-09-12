@@ -79,6 +79,14 @@ class PropertyEditor(QWidget):
                     return True
         return False
 
+    def _ensure_ids(self, data_list):
+        """로드된 데이터에 ID가 없을 경우 재귀적으로 ID를 부여합니다."""
+        for item in data_list:
+            if 'id' not in item:
+                item['id'] = str(uuid.uuid4())
+            if item.get('type') == 'L' and isinstance(item.get('value'), list):
+                self._ensure_ids(item['value'])
+
     # --- UI Mode Control ---
     def clear_view(self):
         self._is_internal_update = True
@@ -129,6 +137,9 @@ class PropertyEditor(QWidget):
         self.delay_spinbox.setValue(data_source.get("delay", 0))
 
         message_body = self._get_current_message_body()
+        if message_body is not None:
+            self._ensure_ids(message_body)  # <<< 핵심 수정: UI에 표시하기 전에 ID를 부여합니다.
+        
         self._refresh_ui_from_model(message_body)
     
     # --- Data Model & UI Synchronization ---
@@ -229,7 +240,7 @@ class PropertyEditor(QWidget):
             return
 
         selected_data = selected_item.data(0, Qt.ItemDataRole.UserRole)
-        if not selected_data:
+        if not selected_data or 'id' not in selected_data: # ID가 없는 데이터는 삭제하지 않도록 방어
             return
 
         root_list = self._get_current_message_body()
@@ -240,7 +251,7 @@ class PropertyEditor(QWidget):
 
     def _change_type_action(self, selected_item: QTreeWidgetItem):
         selected_data = selected_item.data(0, Qt.ItemDataRole.UserRole)
-        if not selected_data:
+        if not selected_data or 'id' not in selected_data:
             return
 
         root_list = self._get_current_message_body()
@@ -282,7 +293,7 @@ class PropertyEditor(QWidget):
             return
 
         item_data = item.data(0, Qt.ItemDataRole.UserRole)
-        if not item_data or item_data.get('type') == 'L':
+        if not item_data or item_data.get('type') == 'L' or 'id' not in item_data:
             return
 
         root_list = self._get_current_message_body()
@@ -306,7 +317,8 @@ class PropertyEditor(QWidget):
             
             if new_value != current_value:
                 real_data['value'] = new_value
-                self._sync_model_and_views()
+                # 값 변경 시에는 전체 동기화 대신 해당 아이템만 업데이트
+                self.current_item.update_visuals()
         except (ValueError, TypeError):
             self._is_internal_update = True
             item.setText(1, str(current_value))
@@ -333,3 +345,4 @@ class PropertyEditor(QWidget):
             QMessageBox.warning(self, "Send Error", "Please select a valid device.")
             return
         self.manual_send_requested.emit(device_id, self.current_manual_message)
+
