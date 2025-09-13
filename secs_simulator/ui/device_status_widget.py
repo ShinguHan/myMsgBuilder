@@ -4,7 +4,7 @@ from PySide6.QtCore import Qt, Signal
 class DeviceStatusWidget(QFrame):
     toggled = Signal(str, bool)
 
-    def __init__(self, device_id: str, host: str, port: int, parent: QWidget | None = None):
+    def __init__(self, device_id: str, host: str, port: int, connection_mode: str, parent: QWidget | None = None):
         super().__init__(parent)
         self.device_id = device_id
         self.is_active = False
@@ -15,7 +15,8 @@ class DeviceStatusWidget(QFrame):
         main_layout.setContentsMargins(12, 8, 12, 8)
         
         top_layout = QHBoxLayout()
-        title_label = QLabel(device_id)
+        mode_char = "A" if connection_mode == "Active" else "P"
+        title_label = QLabel(f"{device_id} ({mode_char})")
         title_label.setObjectName("deviceTitle")
         
         address_label = QLabel(f"{host}:{port}")

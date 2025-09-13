@@ -1,27 +1,26 @@
 {
-    "CV_01": {
+    "CV_01_Passive": {
         "host": "127.0.0.1",
         "port": 5001,
-        "type": "CV"
+        "type": "CV",
+        "connection_mode": "Passive"
     },
-    "CV_02": {
-        "host": "127.0.0.1",
-        "port": 5004,
-        "type": "CV"
-    },
-    "STK_01": {
+    "STK_01_Passive": {
         "host": "127.0.0.1",
         "port": 5002,
-        "type": "Stocker"
+        "type": "Stocker",
+        "connection_mode": "Passive"
     },
-    "OH_01": {
+    "HOST_Active_To_5001": {
         "host": "127.0.0.1",
-        "port": 5003,
-        "type": "OverheadHoist"
+        "port": 5001,
+        "type": "CV",
+        "connection_mode": "Active"
     },
-    "123": {
+    "HOST_Active_To_5002": {
         "host": "127.0.0.1",
-        "port": 50234,
-        "type": "CV"
+        "port": 5002,
+        "type": "Stocker",
+        "connection_mode": "Active"
     }
 }

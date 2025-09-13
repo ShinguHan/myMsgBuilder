@@ -19,8 +19,13 @@ class AddDeviceDialog(QDialog):
         self.port_input.setRange(1024, 65535)
         self.port_input.setValue(5000)
 
+        # ✅ [추가] Active/Passive 모드 선택 콤보박스
+        self.connection_mode_input = QComboBox()
+        self.connection_mode_input.addItems(["Passive", "Active"])
+
         form_layout.addRow("Device ID:", self.id_input)
         form_layout.addRow("Type:", self.type_input)
+        form_layout.addRow("Connection Mode:", self.connection_mode_input)
         form_layout.addRow("Host IP:", self.host_input)
         form_layout.addRow("Port:", self.port_input)
 
@@ -40,5 +45,6 @@ class AddDeviceDialog(QDialog):
             "id": device_id,
             "type": self.type_input.currentText(),
             "host": self.host_input.text(),
-            "port": self.port_input.value()
+            "port": self.port_input.value(),
+            "connection_mode": self.connection_mode_input.currentText()
         }

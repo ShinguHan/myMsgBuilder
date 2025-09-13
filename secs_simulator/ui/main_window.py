@@ -189,7 +189,13 @@ class MainWindow(QMainWindow):
         # 새 설정으로 위젯 재생성
         for device_id, config in device_configs.items():
             if device_id not in self.device_widgets:
-                widget = DeviceStatusWidget(device_id, config['host'], config['port'])
+                # ✅ [버그 수정] DeviceStatusWidget 생성자에 connection_mode 인자를 전달합니다.
+                widget = DeviceStatusWidget(
+                    device_id, 
+                    config['host'], 
+                    config['port'],
+                    config.get('connection_mode', 'Passive') # 기본값으로 'Passive' 사용
+                )
                 widget.toggled.connect(self.on_device_toggled) # 2. 개별 On/Off
                 self.device_widgets[device_id] = widget
                 self.device_list_layout.insertWidget(self.device_list_layout.count() - 1, widget)
@@ -199,7 +205,8 @@ class MainWindow(QMainWindow):
         log_message = f"[{device_id}] {status}"
         self.log_display.append(log_message)
         if device_id in self.device_widgets:
-            is_active = "Listening" in status or "Connected" in status
+            # ✅ [버그 수정] 'Stopped'가 아닐 경우 모두 활성 상태로 간주하여 안정성 향상
+            is_active = "Stopped" not in status
             self.device_widgets[device_id].update_status(status, color, is_active)
 
     @Slot(str, bool)
@@ -222,10 +229,12 @@ class MainWindow(QMainWindow):
             device_info = dialog.get_device_info()
             if device_info:
                 device_id = device_info["id"]
+                # ✅ [버그 수정] connection_mode를 config에 포함하여 전달
                 config = {
                     "host": device_info["host"],
                     "port": device_info["port"],
-                    "type": device_info["type"]
+                    "type": device_info["type"],
+                    "connection_mode": device_info["connection_mode"]
                 }
                 
                 # Orchestrator에 추가 및 파일 저장

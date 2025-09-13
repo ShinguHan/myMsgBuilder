@@ -25,6 +25,8 @@ class Orchestrator:
                     device_id=device_id,
                     host=settings['host'],
                     port=settings['port'],
+                    # ✅ [수정] connection_mode를 전달 (없으면 Passive가 기본값)
+                    connection_mode=settings.get('connection_mode', 'Passive'),
                     status_callback=self._status_callback
                 )
                 self._agents[device_id] = agent
@@ -58,6 +60,8 @@ class Orchestrator:
             device_id=device_id,
             host=config['host'],
             port=config['port'],
+            # ✅ [수정] connection_mode를 전달
+            connection_mode=config.get('connection_mode', 'Passive'),
             status_callback=self._status_callback
         )
         self._agents[device_id] = agent
