@@ -167,8 +167,13 @@ class Orchestrator:
     def send_single_message(self, device_id: str, message: dict):
         agent = self._agents.get(device_id)
         if not agent:
+            # ✅ [수정] 에이전트가 없을 경우를 대비한 로그 추가
+            print(f"Error: Agent '{device_id}' not found for sending single message.")
             return
 
+        # ✅ [핵심 수정] agent.send_message가 비동기 함수이므로,
+        # asyncio.create_task를 사용하여 현재 실행 중인 이벤트 루프에서
+        # 이 작업을 스케줄링(예약)해야 합니다.
         asyncio.create_task(agent.send_message(
             s=message.get('s', 0),
             f=message.get('f', 0),

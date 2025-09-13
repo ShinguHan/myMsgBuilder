@@ -161,20 +161,29 @@ class HsmsConnection:
     async def _handle_select_req(self, s: int, f: int, w: bool, system_bytes: int, body: bytes) -> None:
         """Select.req 처리 및 Select.rsp 응답"""
         self.logger.info("Received Select.req, sending Select.rsp")
-        await self.send_hsms_message(HsmsMessageType.SELECT_RSP, system_bytes)
+        # ✅ [수정] Select.rsp 성공(0)을 나타내는 1바이트 Body를 추가합니다.
+        response_body = struct.pack('B', 0)
+        await self.send_hsms_message(
+            HsmsMessageType.SELECT_RSP,
+            system_bytes,
+            body=response_body
+        )
         self.is_selected = True
         if self._state_change_callback:
             await self._state_change_callback("SELECTED")
 
     async def _handle_select_rsp(self, s: int, f: int, w: bool, system_bytes: int, body: bytes) -> None:
         """Select.rsp 처리 (Active 클라이언트용)"""
-        if s == 0 and f == 0:
+        # ✅ [수정] Select.rsp의 성공 여부는 Body의 첫 바이트로 판단합니다 (0=성공).
+        status = body[0] if body else 2  # Body가 없으면 통신 오류(2)로 간주
+
+        if status == 0:
             self.logger.info("Received successful Select.rsp, connection selected")
             self.is_selected = True
             if self._state_change_callback:
                 await self._state_change_callback("SELECTED")
         else:
-            self.logger.error(f"Select.rsp failed with S{s}F{f}")
+            self.logger.error(f"Select.rsp failed with status code {status}")
             if self._state_change_callback:
                 await self._state_change_callback("DISCONNECTED")
             await self._cleanup_connection()

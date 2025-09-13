@@ -428,8 +428,15 @@ class PropertyEditor(QWidget):
         self.current_item.step_data['delay'] = value
         self.current_item.update_visuals()
 
+    # secs_simulator/ui/scenario_editor/property_editor.py
+
+# ... (기존 코드)
+
     @Slot()
     def on_send_now_clicked(self):
+        # ✅ [추가] 버튼 클릭 시 로그를 남겨 UI 반응을 확인
+        print("Send Now button clicked.")
+        
         device_id = self.device_id_combo.currentText()
         if not device_id or device_id == "Select Device...":
             QMessageBox.warning(self, "Send Error", "Please select a valid device.")
@@ -441,7 +448,12 @@ class PropertyEditor(QWidget):
         elif self.current_item and 'message' in self.current_item.step_data:
             message_to_send = self.current_item.step_data['message']
         
-        if not message_to_send: return
+        if not message_to_send:
+            # ✅ [추가] 보낼 메시지가 없을 경우 로그 추가
+            print("No message data to send.")
+            return
         
+        # ✅ [추가] 메시지 전송 요청 직전 로그 추가
+        print(f"Requesting manual send for device '{device_id}' with message: {message_to_send}")
         self.manual_send_requested.emit(device_id, message_to_send)
 

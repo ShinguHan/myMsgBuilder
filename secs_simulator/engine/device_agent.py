@@ -89,8 +89,9 @@ class DeviceAgent:
             )
             
             addr = self._server.sockets[0].getsockname()
+            # ✅ [수정] 'Listening' 상태도 주황색으로 명확히 표시
             await self._update_status(f"Listening on {addr[0]}:{addr[1]}", "orange")
-            
+
             # 서버 종료 대기
             await self._server.serve_forever()
             
@@ -122,8 +123,9 @@ class DeviceAgent:
         """클라이언트(Active) 모드 실행"""
         while not self._shutdown_event.is_set():
             try:
+                # ✅ [수정] 'Connecting' 상태도 노란색으로 명확히 표시
                 await self._update_status(f"Connecting to {self.host}:{self.port}...", "yellow")
-                
+
                 # 연결 시도 (타임아웃 적용)
                 reader, writer = await asyncio.wait_for(
                     asyncio.open_connection(self.host, self.port),
@@ -163,8 +165,9 @@ class DeviceAgent:
         """연결 설정"""
         try:
             peername = writer.get_extra_info('peername')
-            await self._update_status(f"Connected to {peername[0]}:{peername[1]}", "green")
-            
+            # ✅ [수정] HSMS 규약상 연결 직후는 'SELECTED'가 아니므로, 더 명확한 상태 메시지를 표시합니다.
+            await self._update_status(f"Connected to {peername[0]}:{peername[1]}. Waiting for Select...", "orange")
+
             self._connection_state = ConnectionState.CONNECTED
             self._connection_ready.clear()
             
@@ -179,8 +182,9 @@ class DeviceAgent:
                 self._heartbeat_task.cancel()
             self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
             
-            # 연결 처리 시작
-            await self._connection.handle_connection()
+            # ✅ [핵심 수정] 메시지 수신 루프를 await로 기다리지 않고,
+            # 백그라운드 태스크로 실행하여 프로그램 흐름이 계속 진행되도록 합니다.
+            asyncio.create_task(self._connection.handle_connection())
             
         except Exception as e:
             self.logger.error(f"Connection establishment failed: {e}")
