@@ -1,43 +1,40 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
-from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPushButton
+from PySide6.QtCore import Qt, Signal
 
 class DeviceStatusWidget(QFrame):
-    """개별 장비의 상태를 시각적으로 표시하는 재사용 가능한 위젯입니다."""
+    toggled = Signal(str, bool)
 
     def __init__(self, device_id: str, host: str, port: int, parent: QWidget | None = None):
         super().__init__(parent)
         self.device_id = device_id
+        self.is_active = False
         
         self.setObjectName("statusCard")
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(12, 8, 12, 8)
-        main_layout.setSpacing(0)
-
-        # --- 상단 (제목 & 주소) ---
+        
         top_layout = QHBoxLayout()
-        top_layout.setContentsMargins(0, 0, 0, 4)
         title_label = QLabel(device_id)
         title_label.setObjectName("deviceTitle")
         
         address_label = QLabel(f"{host}:{port}")
         address_label.setObjectName("addressLabel")
-        address_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+        # 2. 개별 On/Off 버튼 추가
+        self.toggle_button = QPushButton("OFF")
+        self.toggle_button.setCheckable(True)
+        self.toggle_button.setChecked(False)
+        self.toggle_button.setObjectName("deviceToggleButton")
+        self.toggle_button.setFixedSize(50, 24)
+        self.toggle_button.toggled.connect(self.on_toggle)
 
         top_layout.addWidget(title_label)
+        top_layout.addStretch()
         top_layout.addWidget(address_label)
+        top_layout.addWidget(self.toggle_button)
         main_layout.addLayout(top_layout)
 
-        # --- 구분선 ---
-        line = QFrame()
-        line.setFrameShape(QFrame.Shape.HLine)
-        line.setFrameShadow(QFrame.Shadow.Sunken)
-        line.setObjectName("cardSeparator")
-        main_layout.addWidget(line)
-
-        main_layout.addStretch(1)
-
-        # --- 하단 (상태) ---
         status_layout = QHBoxLayout()
         status_layout.setContentsMargins(0, 4, 0, 0)
         self.status_indicator = QLabel()
@@ -45,15 +42,28 @@ class DeviceStatusWidget(QFrame):
 
         self.status_label = QLabel("Stopped")
         self.status_label.setObjectName("statusLabel")
-        self.status_label.setWordWrap(True)
 
         status_layout.addWidget(self.status_indicator)
         status_layout.addWidget(self.status_label, 1)
         main_layout.addLayout(status_layout)
         
-        self.update_status("Stopped", "#555555")
+        self.update_status("Stopped", "gray", False)
 
-    def update_status(self, status: str, color: str):
-        """위젯의 텍스트와 상태 표시등 색상을 업데이트합니다."""
+    def on_toggle(self, checked: bool):
+        self.is_active = checked
+        if checked:
+            self.toggle_button.setText("ON")
+            self.toggle_button.setStyleSheet("background-color: #34C759;") # Green
+        else:
+            self.toggle_button.setText("OFF")
+            self.toggle_button.setStyleSheet("background-color: #555555;") # Default gray
+        self.toggled.emit(self.device_id, checked)
+
+    def update_status(self, status: str, color: str, is_active: bool):
         self.status_label.setText(status)
         self.status_indicator.setStyleSheet(f"background-color: {color};")
+        
+        was_active = self.is_active
+        self.is_active = is_active
+        if was_active != self.is_active:
+            self.toggle_button.setChecked(is_active)
