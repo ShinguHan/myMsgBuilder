@@ -18,7 +18,7 @@ class SecsTypeDelegate(QStyledItemDelegate):
         if index.column() == 0:
             editor = QComboBox(parent)
             editor.addItems(self.SECS_TYPES)
-            editor.setStyleSheet("padding: 2px; background-color: #3E3E3E;")
+            editor.setStyleSheet("padding: 1.5px; background-color: #3E3E3E;")
             editor.setMaxVisibleItems(len(self.SECS_TYPES))
             return editor
         return super().createEditor(parent, option, index)
@@ -74,9 +74,13 @@ class PropertyEditor(QWidget):
         self.message_body_tree.setItemDelegateForColumn(0, SecsTypeDelegate(self))
         
         header = self.message_body_tree.header()
+        header.setStretchLastSection(False)
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        # header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        # ✅ [수정] Action 컬럼 너비를 고정값으로 변경
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        header.resizeSection(2, 60)
         
         self.add_root_item_button = QPushButton("➕ Add Root Item")
         send_layout.addWidget(self.message_body_tree)
@@ -269,7 +273,7 @@ class PropertyEditor(QWidget):
     def _add_action_buttons(self, tree_item: QTreeWidgetItem):
         widget = QWidget()
         layout = QHBoxLayout(widget)
-        layout.setContentsMargins(0, 0, 5, 0)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(5)
         
         button_style = """
