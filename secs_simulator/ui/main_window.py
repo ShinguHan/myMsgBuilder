@@ -55,6 +55,7 @@ class MainWindow(QMainWindow):
         self.toggle_button = QPushButton("◀ Devices")
         self.toggle_button.clicked.connect(self.toggle_left_panel)
         self.toggle_button.setObjectName("toggleButton")
+        self.toggle_button.setStyleSheet("padding: 8px 10px;")
         header_layout.addWidget(self.toggle_button)
         # ✅ [수정] 버튼을 찌그러뜨리던 불필요한 Stretch 제거
         left_layout.addLayout(header_layout)
@@ -269,4 +270,5 @@ class MainWindow(QMainWindow):
             self.log_display.append(f"--- Scenario loaded from {file_path} ---")
         except Exception as e:
             self.log_display.append(f"--- Error loading scenario: {e} ---")
+
 
