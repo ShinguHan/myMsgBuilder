@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFileDialog,
-                               QPushButton, QTextEdit, QScrollArea, QFrame, QMenu
-                               )
-from PySide6.QtCore import Signal, Slot, QEasingCurve, Qt,QPropertyAnimation
+                               QPushButton, QTextEdit, QScrollArea, QFrame, QMenu)
+from PySide6.QtCore import (Signal, Slot, QEasingCurve, QSize, Qt, 
+                              QPropertyAnimation, QParallelAnimationGroup)
 from PySide6.QtGui import QCursor
 from typing import Dict
 import asyncio
@@ -50,19 +50,21 @@ class MainWindow(QMainWindow):
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(10)
 
-        # 1. 패널 숨김 버튼 추가
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(10, 5, 10, 5)
         self.toggle_button = QPushButton("◀ Devices")
         self.toggle_button.clicked.connect(self.toggle_left_panel)
         self.toggle_button.setObjectName("toggleButton")
         header_layout.addWidget(self.toggle_button)
-        header_layout.addStretch()
+        # ✅ [수정] 버튼을 찌그러뜨리던 불필요한 Stretch 제거
         left_layout.addLayout(header_layout)
+        
+        self.collapsible_container = QWidget()
+        collapsible_layout = QVBoxLayout(self.collapsible_container)
+        collapsible_layout.setContentsMargins(10, 0, 10, 0)
+        collapsible_layout.setSpacing(10)
 
-        # 전체 제어 버튼
         control_layout = QHBoxLayout()
-        control_layout.setContentsMargins(10, 0, 10, 0)
         self.start_button = QPushButton("🚀 Start All")
         self.stop_button = QPushButton("⏹️ Stop All")
         self.stop_button.setEnabled(False)
@@ -70,20 +72,23 @@ class MainWindow(QMainWindow):
         self.stop_button.clicked.connect(self.stop_agents)
         control_layout.addWidget(self.start_button)
         control_layout.addWidget(self.stop_button)
-        left_layout.addLayout(control_layout)
+        collapsible_layout.addLayout(control_layout)
 
-        # 디바이스 목록 (세로 정렬)
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_content = QWidget()
-        self.device_list_layout = QVBoxLayout(scroll_content) # 4. 세로 정렬
+        self.device_list_layout = QVBoxLayout(scroll_content)
         self.device_list_layout.setSpacing(10)
-        self.device_list_layout.addStretch() # 위젯이 위부터 쌓이도록
+        self.device_list_layout.addStretch()
         scroll_area.setWidget(scroll_content)
-        left_layout.addWidget(scroll_area)
+        collapsible_layout.addWidget(scroll_area)
+        
+        left_layout.addWidget(self.collapsible_container)
+        
+        # ✅ [수정] 모든 위젯을 상단으로 밀어 올리는 Stretch 추가
+        left_layout.addStretch()
 
-        # 3. 디바이스 추가 기능 (컨텍스트 메뉴)
-        scroll_content.setContextMenuPolicy(Qt.CustomContextMenu)
+        scroll_content.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         scroll_content.customContextMenuRequested.connect(self.show_device_context_menu)
         
         # --- Right Panel ---
@@ -118,16 +123,36 @@ class MainWindow(QMainWindow):
 
     def toggle_left_panel(self):
         start_width = self.left_panel.width()
-        end_width = 0 if start_width > 0 else 300
+        is_collapsing = start_width > 50
+        end_width = 50 if is_collapsing else 300
 
-        self.animation = QPropertyAnimation(self.left_panel, b"maximumWidth")
-        self.animation.setDuration(300)
-        self.animation.setStartValue(start_width)
-        self.animation.setEndValue(end_width)
-        self.animation.setEasingCurve(QEasingCurve.Type.InOutQuart)
-        self.animation.start()
+        if not is_collapsing:
+            self.collapsible_container.setVisible(True)
 
-        if end_width == 0:
+        self.animation_group = QParallelAnimationGroup(self)
+        anim_max = QPropertyAnimation(self.left_panel, b"maximumWidth")
+        anim_max.setDuration(300)
+        anim_max.setStartValue(start_width)
+        anim_max.setEndValue(end_width)
+        anim_max.setEasingCurve(QEasingCurve.Type.InOutQuart)
+        
+        anim_min = QPropertyAnimation(self.left_panel, b"minimumWidth")
+        anim_min.setDuration(300)
+        anim_min.setStartValue(start_width)
+        anim_min.setEndValue(end_width)
+        anim_min.setEasingCurve(QEasingCurve.Type.InOutQuart)
+        
+        self.animation_group.addAnimation(anim_max)
+        self.animation_group.addAnimation(anim_min)
+        
+        def on_animation_finished():
+            if is_collapsing:
+                self.collapsible_container.setVisible(False)
+
+        self.animation_group.finished.connect(on_animation_finished)
+        self.animation_group.start()
+
+        if is_collapsing:
             self.toggle_button.setText("▶")
         else:
             self.toggle_button.setText("◀ Devices")
@@ -150,18 +175,16 @@ class MainWindow(QMainWindow):
         event.accept()
 
     def populate_device_widgets(self, device_configs: dict):
-        # 기존 위젯 클리어
         for i in reversed(range(self.device_list_layout.count() -1)):
             widget_to_remove = self.device_list_layout.itemAt(i).widget()
             if widget_to_remove:
                 widget_to_remove.setParent(None)
         self.device_widgets.clear()
 
-        # 새 설정으로 위젯 재생성
         for device_id, config in device_configs.items():
             if device_id not in self.device_widgets:
                 widget = DeviceStatusWidget(device_id, config['host'], config['port'])
-                widget.toggled.connect(self.on_device_toggled) # 2. 개별 On/Off
+                widget.toggled.connect(self.on_device_toggled)
                 self.device_widgets[device_id] = widget
                 self.device_list_layout.insertWidget(self.device_list_layout.count() - 1, widget)
 
@@ -199,10 +222,8 @@ class MainWindow(QMainWindow):
                     "type": device_info["type"]
                 }
                 
-                # Orchestrator에 추가 및 파일 저장
                 success = self.orchestrator.add_device(device_id, config)
                 if success:
-                    # UI 갱신
                     new_configs = self.orchestrator.get_device_configs()
                     self.populate_device_widgets(new_configs)
                     self.log_display.append(f"--- Device '{device_id}' added successfully. ---")
@@ -248,3 +269,4 @@ class MainWindow(QMainWindow):
             self.log_display.append(f"--- Scenario loaded from {file_path} ---")
         except Exception as e:
             self.log_display.append(f"--- Error loading scenario: {e} ---")
+

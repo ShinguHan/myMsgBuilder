@@ -20,15 +20,15 @@ class DeviceStatusWidget(QFrame):
         
         address_label = QLabel(f"{host}:{port}")
         address_label.setObjectName("addressLabel")
+        address_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
-        # 2. 개별 On/Off 버튼 추가
-        self.toggle_button = QPushButton("OFF")
+        self.toggle_button = QPushButton("Off")
         self.toggle_button.setCheckable(True)
         self.toggle_button.setChecked(False)
         self.toggle_button.setObjectName("deviceToggleButton")
-        self.toggle_button.setFixedSize(50, 24)
+        self.toggle_button.setFixedWidth(60)
         self.toggle_button.toggled.connect(self.on_toggle)
-
+        
         top_layout.addWidget(title_label)
         top_layout.addStretch()
         top_layout.addWidget(address_label)
@@ -67,3 +67,4 @@ class DeviceStatusWidget(QFrame):
         self.is_active = is_active
         if was_active != self.is_active:
             self.toggle_button.setChecked(is_active)
+
