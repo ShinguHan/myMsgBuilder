@@ -1,5 +1,6 @@
 import asyncio
 import struct
+import logging
 from enum import IntEnum
 from typing import Optional, Callable, Awaitable
 
@@ -19,119 +20,281 @@ class HsmsMessageType(IntEnum):
     SEPARATE_REQ = 9
 
 class HsmsConnection:
-    """Manages the lifecycle and communication for a single HSMS connection."""
+    """개선된 HSMS 연결 관리 클래스"""
 
-    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, message_callback: Callable[[dict], Awaitable]):
+    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, 
+                 message_callback: Callable[[dict], Awaitable],
+                 state_change_callback: Optional[Callable[[str], Awaitable]] = None):
         self.reader = reader
         self.writer = writer
         self.peername = writer.get_extra_info('peername')
         self.is_selected = False
         self._system_bytes_counter = 0
         self._message_callback = message_callback
-        print(f"HSMS: New connection from {self.peername}")
+        self._state_change_callback = state_change_callback
+        self._disconnect_event = asyncio.Event()
+        self._send_lock = asyncio.Lock()  # 동시 전송 방지
+        
+        self.logger = logging.getLogger(f"HSMS-{self.peername}")
+        self.logger.info(f"New HSMS connection established")
 
     def get_next_system_bytes(self) -> int:
         """다음에 사용할 System Bytes 값을 반환하고 카운터를 1 증가시킵니다."""
-        self._system_bytes_counter += 1
+        self._system_bytes_counter = (self._system_bytes_counter + 1) & 0xFFFFFFFF
         return self._system_bytes_counter
 
     async def handle_connection(self) -> None:
-        """The main loop for reading and processing incoming HSMS messages."""
+        """메시지 수신 및 처리 메인 루프"""
         try:
             while not self.writer.is_closing():
-                length_bytes = await self.reader.readexactly(4)
-                message_length = int.from_bytes(length_bytes, 'big')
-                message_payload = await self.reader.readexactly(message_length)
-                await self._process_message(message_payload)
-        except asyncio.IncompleteReadError:
-            print(f"HSMS: Connection closed by peer {self.peername}")
+                try:
+                    # 메시지 길이 읽기 (4바이트)
+                    length_bytes = await self.reader.readexactly(4)
+                    if not length_bytes:
+                        break
+                        
+                    message_length = int.from_bytes(length_bytes, 'big')
+                    
+                    # 메시지 길이 검증
+                    if message_length < 10 or message_length > 0xFFFFFF:
+                        self.logger.error(f"Invalid message length: {message_length}")
+                        break
+                    
+                    # 메시지 페이로드 읽기
+                    message_payload = await self.reader.readexactly(message_length)
+                    if len(message_payload) != message_length:
+                        self.logger.error("Incomplete message received")
+                        break
+                    
+                    await self._process_message(message_payload)
+                    
+                except asyncio.IncompleteReadError as e:
+                    if e.partial:
+                        self.logger.warning(f"Partial data received: {len(e.partial)} bytes")
+                    else:
+                        self.logger.info("Connection closed by peer (clean disconnect)")
+                    break
+                except ConnectionResetError:
+                    self.logger.info("Connection reset by peer")
+                    break
+                except Exception as e:
+                    self.logger.error(f"Unexpected error in message handling: {e}")
+                    break
+                    
         except Exception as e:
-            print(f"HSMS: An error occurred on connection {self.peername}: {e}")
+            self.logger.error(f"Critical error in connection handler: {e}")
         finally:
-            if not self.writer.is_closing():
+            await self._cleanup_connection()
+
+    async def _cleanup_connection(self):
+        """연결 정리"""
+        self.logger.info("Cleaning up connection")
+        self.is_selected = False
+        self._disconnect_event.set()
+        
+        if self._state_change_callback:
+            try:
+                await self._state_change_callback("DISCONNECTED")
+            except Exception as e:
+                self.logger.error(f"State change callback error: {e}")
+        
+        if not self.writer.is_closing():
+            try:
                 self.writer.close()
                 await self.writer.wait_closed()
+            except Exception as e:
+                self.logger.error(f"Error closing writer: {e}")
+
+    async def wait_for_disconnect(self):
+        """연결 종료 대기"""
+        await self._disconnect_event.wait()
 
     async def _process_message(self, payload: bytes) -> None:
-        """Parses the message header and routes to the appropriate handler."""
-        header = payload[:10]
-        body = payload[10:]
-        
-        _, stype, s, f, ptype, system_bytes = struct.unpack('>HBBHHI', header)
-        w_bit = bool(s & 0x80)
-        s &= 0x7F 
-        
-        try:
-            msg_type = HsmsMessageType(stype)
-        except ValueError:
-            print(f"HSMS: Received unknown message type {stype}")
+        """메시지 파싱 및 라우팅"""
+        if len(payload) < 10:
+            self.logger.error("Message too short for HSMS header")
             return
+            
+        try:
+            header = payload[:10]
+            body = payload[10:]
+            
+            # HSMS 헤더 파싱
+            session_id, stype, s, f, ptype, system_bytes = struct.unpack('>HBBHHI', header)
+            w_bit = bool(s & 0x80)
+            s &= 0x7F 
+            
+            # 메시지 타입 검증
+            try:
+                msg_type = HsmsMessageType(stype)
+            except ValueError:
+                self.logger.error(f"Unknown message type: {stype}")
+                await self._send_reject(system_bytes, 3)  # Message not supported
+                return
 
-        print(f"HSMS RECV ({self.peername}): Type={msg_type.name} S{s}F{f} W={w_bit} SysBytes={system_bytes}")
+            self.logger.debug(f"RECV: Type={msg_type.name} S{s}F{f} W={w_bit} SB={system_bytes}")
 
-        handler_map = {
-            HsmsMessageType.SELECT_REQ: self._handle_select_req,
-            HsmsMessageType.LINKTEST_REQ: self._handle_linktest_req,
-            HsmsMessageType.SEPARATE_REQ: self._handle_separate_req,
-            HsmsMessageType.DATA_MESSAGE: self._handle_data_message,
-        }
+            # 메시지 타입별 처리
+            handler_map = {
+                HsmsMessageType.SELECT_REQ: self._handle_select_req,
+                HsmsMessageType.SELECT_RSP: self._handle_select_rsp,
+                HsmsMessageType.DESELECT_REQ: self._handle_deselect_req,
+                HsmsMessageType.LINKTEST_REQ: self._handle_linktest_req,
+                HsmsMessageType.LINKTEST_RSP: self._handle_linktest_rsp,
+                HsmsMessageType.SEPARATE_REQ: self._handle_separate_req,
+                HsmsMessageType.DATA_MESSAGE: self._handle_data_message,
+                HsmsMessageType.REJECT_REQ: self._handle_reject_req,
+            }
 
-        handler = handler_map.get(msg_type)
-        if handler:
-            await handler(s, f, w_bit, system_bytes, body)
-        else:
-            print(f"HSMS: No handler for message type {msg_type.name}")
+            handler = handler_map.get(msg_type)
+            if handler:
+                await handler(s, f, w_bit, system_bytes, body)
+            else:
+                self.logger.warning(f"No handler for message type {msg_type.name}")
+                await self._send_reject(system_bytes, 3)  # Message not supported
+                
+        except struct.error as e:
+            self.logger.error(f"Invalid message format: {e}")
+        except Exception as e:
+            self.logger.error(f"Error processing message: {e}")
 
     async def _handle_select_req(self, s: int, f: int, w: bool, system_bytes: int, body: bytes) -> None:
-        """Handles a Select.req and responds with Select.rsp."""
-        print("HSMS: Responding to Select.req with Select.rsp")
+        """Select.req 처리 및 Select.rsp 응답"""
+        self.logger.info("Received Select.req, sending Select.rsp")
         await self.send_hsms_message(HsmsMessageType.SELECT_RSP, system_bytes)
         self.is_selected = True
+        if self._state_change_callback:
+            await self._state_change_callback("SELECTED")
+
+    async def _handle_select_rsp(self, s: int, f: int, w: bool, system_bytes: int, body: bytes) -> None:
+        """Select.rsp 처리 (Active 클라이언트용)"""
+        if s == 0 and f == 0:
+            self.logger.info("Received successful Select.rsp, connection selected")
+            self.is_selected = True
+            if self._state_change_callback:
+                await self._state_change_callback("SELECTED")
+        else:
+            self.logger.error(f"Select.rsp failed with S{s}F{f}")
+            if self._state_change_callback:
+                await self._state_change_callback("DISCONNECTED")
+            await self._cleanup_connection()
+
+    async def _handle_deselect_req(self, s: int, f: int, w: bool, system_bytes: int, body: bytes) -> None:
+        """Deselect.req 처리"""
+        self.logger.info("Received Deselect.req, sending Deselect.rsp")
+        await self.send_hsms_message(HsmsMessageType.DESELECT_RSP, system_bytes)
+        self.is_selected = False
+        if self._state_change_callback:
+            await self._state_change_callback("DESELECTED")
 
     async def _handle_linktest_req(self, s: int, f: int, w: bool, system_bytes: int, body: bytes) -> None:
-        """Handles a Linktest.req and responds with Linktest.rsp."""
-        print("HSMS: Responding to Linktest.req with Linktest.rsp")
+        """Linktest.req 처리 및 Linktest.rsp 응답"""
+        self.logger.debug("Received Linktest.req, sending Linktest.rsp")
         await self.send_hsms_message(HsmsMessageType.LINKTEST_RSP, system_bytes)
 
+    async def _handle_linktest_rsp(self, s: int, f: int, w: bool, system_bytes: int, body: bytes) -> None:
+        """Linktest.rsp 처리"""
+        self.logger.debug("Received Linktest.rsp")
+
     async def _handle_separate_req(self, s: int, f: int, w: bool, system_bytes: int, body: bytes) -> None:
-        """Handles a Separate.req by closing the connection."""
-        print("HSMS: Received Separate.req, closing connection.")
-        if not self.writer.is_closing():
-            self.writer.close()
-            await self.writer.wait_closed()
+        """Separate.req 처리 및 연결 종료"""
+        self.logger.info("Received Separate.req, closing connection")
+        await self._cleanup_connection()
+
+    async def _handle_reject_req(self, s: int, f: int, w: bool, system_bytes: int, body: bytes) -> None:
+        """Reject.req 처리"""
+        reason = body[0] if body else 0
+        self.logger.warning(f"Received Reject.req with reason: {reason}")
 
     async def _handle_data_message(self, s: int, f: int, w: bool, system_bytes: int, body: bytes) -> None:
-        """Handles an incoming data message and passes it to the agent."""
-        parsed_body = parse_body(body)
-        
-        message = {
-            's': s, 'f': f, 'w_bit': w,
-            'system_bytes': system_bytes,
-            'body': parsed_body
-        }
-        print(f"HSMS: Parsed data message, forwarding to agent: S{s}F{f}")
-        await self._message_callback(message)
+        """데이터 메시지 처리 및 콜백 호출"""
+        if not self.is_selected:
+            self.logger.warning(f"Received data message S{s}F{f} but not selected, sending reject")
+            await self._send_reject(system_bytes, 4)  # Connection not ready
+            return
+            
+        try:
+            parsed_body = parse_body(body) if body else []
+            
+            message = {
+                's': s, 'f': f, 'w_bit': w,
+                'system_bytes': system_bytes,
+                'body': parsed_body
+            }
+            
+            self.logger.debug(f"Parsed data message S{s}F{f}, forwarding to agent")
+            await self._message_callback(message)
+            
+        except Exception as e:
+            self.logger.error(f"Error parsing message body: {e}")
+            if w:  # W-bit이 설정된 경우 에러 응답 전송
+                await self._send_abort(system_bytes)
 
-    async def send_secs_message(self, s: int, f: int, system_bytes: int, body_obj: Optional[list] = None) -> None:
-        """Constructs and sends a SECS-II data message."""
-        body_bytes = build_secs_body(body_obj or [])
-        await self.send_hsms_message(HsmsMessageType.DATA_MESSAGE, system_bytes, s, f, body=body_bytes)
+    async def _send_reject(self, system_bytes: int, reason: int):
+        """Reject 메시지 전송"""
+        body = struct.pack('B', reason)
+        await self.send_hsms_message(
+            HsmsMessageType.REJECT_REQ, 
+            system_bytes, 
+            body=body
+        )
+
+    async def _send_abort(self, system_bytes: int):
+        """Abort 메시지 전송 (S9F13)"""
+        try:
+            await self.send_secs_message(9, 13, False, system_bytes, [])
+        except Exception as e:
+            self.logger.error(f"Failed to send abort: {e}")
+
+    async def send_secs_message(self, s: int, f: int, w_bit: bool, 
+                               system_bytes: int, body_obj: Optional[list] = None) -> None:
+        """SECS-II 데이터 메시지 구성 및 전송"""
+        if not self.is_selected and not (s == 9 and f in [1, 5, 9, 11, 13]):  # 에러 메시지 예외
+            raise RuntimeError("Connection not selected")
+            
+        try:
+            body_bytes = build_secs_body(body_obj or [])
+            await self.send_hsms_message(
+                HsmsMessageType.DATA_MESSAGE, 
+                system_bytes, 
+                s, f, w_bit=w_bit, 
+                body=body_bytes
+            )
+        except Exception as e:
+            self.logger.error(f"Failed to send SECS message S{s}F{f}: {e}")
+            raise
 
     async def send_hsms_message(
         self, msg_type: HsmsMessageType, system_bytes: int, 
         s: int = 0, f: int = 0, w_bit: bool = False, body: bytes = b''
     ) -> None:
-        """Constructs and sends a full HSMS message."""
+        """HSMS 메시지 구성 및 전송"""
         if self.writer.is_closing():
-            print(f"HSMS WARN ({self.peername}): Writer is closed, cannot send message.")
-            return
+            raise RuntimeError("Connection is closing")
 
-        if w_bit: s |= 0x80
+        async with self._send_lock:  # 동시 전송 방지
+            try:
+                # W-bit 설정
+                s_with_w_bit = s
+                if w_bit:
+                    s_with_w_bit |= 0x80
 
-        header = struct.pack('>HBBHHI', 0, msg_type.value, s, f, 0, system_bytes)
-        payload = header + body
-        length_bytes = len(payload).to_bytes(4, 'big')
-        
-        self.writer.write(length_bytes + payload)
-        await self.writer.drain()
-        print(f"HSMS SENT ({self.peername}): Type={msg_type.name} S{s&0x7F}F{f} W={w_bit} SysBytes={system_bytes}")
+                # HSMS 헤더 구성 (Session ID=0, PType=0)
+                header = struct.pack('>HBBHHI', 0, msg_type.value, s_with_w_bit, f, 0, system_bytes)
+                payload = header + body
+                length_bytes = len(payload).to_bytes(4, 'big')
+                
+                # 전송
+                self.writer.write(length_bytes + payload)
+                await self.writer.drain()
+                
+                self.logger.debug(f"SENT: Type={msg_type.name} S{s}F{f} W={w_bit} SB={system_bytes}")
+                
+            except Exception as e:
+                self.logger.error(f"Failed to send HSMS message: {e}")
+                raise
+
+    def is_alive(self) -> bool:
+        """연결 상태 확인"""
+        return (not self.writer.is_closing() and 
+                not self._disconnect_event.is_set())
