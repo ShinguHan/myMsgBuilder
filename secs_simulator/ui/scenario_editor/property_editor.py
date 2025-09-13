@@ -1,7 +1,7 @@
 # secs_simulator/ui/scenario_editor/property_editor.py
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QFormLayout, QTreeWidget, QTreeWidgetItem,
-    QPushButton, QComboBox, QDoubleSpinBox, QSpinBox,
+    QPushButton, QComboBox, QDoubleSpinBox, QSpinBox,QMessageBox,
     QStyledItemDelegate, QHBoxLayout, QHeaderView
 )
 from PySide6.QtCore import Slot, Qt, Signal
@@ -431,7 +431,9 @@ class PropertyEditor(QWidget):
     @Slot()
     def on_send_now_clicked(self):
         device_id = self.device_id_combo.currentText()
-        if not device_id or device_id == "Select Device...": return
+        if not device_id or device_id == "Select Device...":
+            QMessageBox.warning(self, "Send Error", "Please select a valid device.")
+            return
         
         message_to_send = None
         if self.current_manual_message:

@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFileDialog,
-                               QPushButton, QTextEdit, QScrollArea, QFrame, QMenu)
-from PySide6.QtCore import (Signal, Slot, QEasingCurve, QSize, Qt, 
-                              QPropertyAnimation, QParallelAnimationGroup)
+                               QPushButton, QTextEdit, QScrollArea, QFrame, QMenu
+                               )
+from PySide6.QtCore import Signal, Slot, QEasingCurve, Qt,QPropertyAnimation, QParallelAnimationGroup
 from PySide6.QtGui import QCursor
 from typing import Dict
 import asyncio
@@ -16,9 +16,10 @@ from secs_simulator.ui.add_device_dialog import AddDeviceDialog
 class MainWindow(QMainWindow):
     agent_status_updated = Signal(str, str, str)
 
-    def __init__(self, orchestrator: Orchestrator):
+    def __init__(self, orchestrator: Orchestrator, shutdown_future: asyncio.Future):
         super().__init__()
         self.orchestrator = orchestrator
+        self.shutdown_future = shutdown_future
         
         device_configs = self.orchestrator.get_device_configs()
         
@@ -50,6 +51,7 @@ class MainWindow(QMainWindow):
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(10)
 
+        # 1. 패널 숨김 버튼 추가
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(10, 5, 10, 5)
         self.toggle_button = QPushButton("◀ Devices")
@@ -75,6 +77,7 @@ class MainWindow(QMainWindow):
         control_layout.addWidget(self.stop_button)
         collapsible_layout.addLayout(control_layout)
 
+        # 디바이스 목록 (세로 정렬)
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_content = QWidget()
@@ -171,21 +174,23 @@ class MainWindow(QMainWindow):
         self.stop_button.setEnabled(False)
 
     def closeEvent(self, event):
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(self.orchestrator.stop_all_agents())
+        if not self.shutdown_future.done():
+            self.shutdown_future.set_result(True)
         event.accept()
 
     def populate_device_widgets(self, device_configs: dict):
+        # 기존 위젯 클리어
         for i in reversed(range(self.device_list_layout.count() -1)):
             widget_to_remove = self.device_list_layout.itemAt(i).widget()
             if widget_to_remove:
                 widget_to_remove.setParent(None)
         self.device_widgets.clear()
 
+        # 새 설정으로 위젯 재생성
         for device_id, config in device_configs.items():
             if device_id not in self.device_widgets:
                 widget = DeviceStatusWidget(device_id, config['host'], config['port'])
-                widget.toggled.connect(self.on_device_toggled)
+                widget.toggled.connect(self.on_device_toggled) # 2. 개별 On/Off
                 self.device_widgets[device_id] = widget
                 self.device_list_layout.insertWidget(self.device_list_layout.count() - 1, widget)
 
@@ -223,8 +228,10 @@ class MainWindow(QMainWindow):
                     "type": device_info["type"]
                 }
                 
+                # Orchestrator에 추가 및 파일 저장
                 success = self.orchestrator.add_device(device_id, config)
                 if success:
+                    # UI 갱신
                     new_configs = self.orchestrator.get_device_configs()
                     self.populate_device_widgets(new_configs)
                     self.log_display.append(f"--- Device '{device_id}' added successfully. ---")
@@ -270,5 +277,3 @@ class MainWindow(QMainWindow):
             self.log_display.append(f"--- Scenario loaded from {file_path} ---")
         except Exception as e:
             self.log_display.append(f"--- Error loading scenario: {e} ---")
-
-

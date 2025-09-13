@@ -9,34 +9,42 @@ from PySide6.QtCore import QFile, QTextStream
 from secs_simulator.engine.orchestrator import Orchestrator
 from secs_simulator.ui.main_window import MainWindow
 
-# ✅ [버그 수정] 불필요한 색상 결정 로직을 제거하고, 전달받은 color를 그대로 사용합니다.
 async def status_update_callback(window: MainWindow, device_id: str, status: str, color: str):
     """Orchestrator가 UI 업데이트를 위해 호출할 콜백. UI의 Signal을 emit합니다."""
-    window.agent_status_updated.emit(device_id, status, color)
+    # window가 종료 과정에서 None이 될 수 있으므로 확인합니다.
+    if window:
+        window.agent_status_updated.emit(device_id, status, color)
 
-async def main():
+async def main_async(app: QApplication):
     """애플리케이션의 메인 비동기 로직."""
     
+    shutdown_future = asyncio.Future()
     window = None 
-    
-    # ✅ [버그 수정] callback_wrapper가 3개의 인자(dev_id, msg, color)를 받도록 수정합니다.
+
     async def callback_wrapper(dev_id, msg, color):
         if window:
-            # ✅ [버그 수정] status_update_callback에 color 인자를 전달합니다.
             asyncio.create_task(status_update_callback(window, dev_id, msg, color))
 
     # 1. Orchestrator 인스턴스 생성
     orchestrator = Orchestrator(status_callback=callback_wrapper)
 
     # 2. 장비 설정 파일 로드
-    device_configs = orchestrator.load_device_configs('./secs_simulator/engine/devices.json')
+    orchestrator.load_device_configs('./secs_simulator/engine/devices.json')
 
-    # 3. 메인 윈도우 생성 및 Orchestrator와 연결
-    window = MainWindow(orchestrator)
+    # 3. 메인 윈도우 생성 및 Orchestrator와 종료 Future 연결
+    window = MainWindow(orchestrator, shutdown_future)
     window.show()
 
-    # qasync 이벤트 루프가 계속 실행되도록 Future를 반환
-    await asyncio.get_event_loop().create_future()
+    # 4. 종료 신호를 받을 때까지 대기
+    await shutdown_future
+    
+    # 5. 종료 신호를 받으면, 모든 에이전트를 정지시키는 정리 작업 수행
+    print("Shutdown signaled. Stopping all agents...")
+    await orchestrator.stop_all_agents()
+    print("All agents stopped. Exiting.")
+    
+    # 6. 모든 비동기 정리가 끝난 후, Qt 애플리케이션을 종료하여 이벤트 루프를 중지시킵니다.
+    app.quit()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
@@ -53,6 +61,20 @@ if __name__ == "__main__":
     asyncio.set_event_loop(loop)
 
     try:
-        loop.run_until_complete(main())
+        # main_async를 비동기 태스크로 생성합니다.
+        loop.create_task(main_async(app))
+        # 이벤트 루프를 계속 실행합니다. app.quit()이 호출되면 중지됩니다.
+        loop.run_forever()
     except KeyboardInterrupt:
+        print("Keyboard interrupt received, closing loop.")
+    finally:
+        # 루프가 중지된 후 모든 태스크를 취소하고 정리합니다.
+        tasks = asyncio.all_tasks(loop=loop)
+        for task in tasks:
+            task.cancel()
+        
+        # 취소된 태스크들이 완료될 때까지 기다립니다.
+        loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+        
         loop.close()
+
