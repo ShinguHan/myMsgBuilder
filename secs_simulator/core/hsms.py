@@ -119,14 +119,25 @@ class HsmsConnection:
             header = payload[:10]
             body = payload[10:]
             
-            # HSMS 헤더 파싱
-            session_id, stype, s, f, ptype, system_bytes = struct.unpack('>HBBHHI', header)
-            w_bit = bool(s & 0x80)
-            s &= 0x7F 
+            # ✅ [수정] 헤더 unpack 포맷을 올바른 10바이트 구조로 변경합니다.
+            # 포맷: SessionID(H), Byte3(B), Byte4(B), PType(H), SystemBytes(I)
+            session_id, byte3, byte4, ptype, system_bytes = struct.unpack('>HBBHI', header)
+
+            # 데이터 메시지와 제어 메시지를 구분하여 해석합니다.
+            # HSMS 표준에 따라 데이터 메시지의 SType은 0입니다.
+            # 제어 메시지(Select, Linktest 등)는 SType이 0이 아닙니다.
+            # 여기서는 Byte4(stype)를 기준으로 삼습니다.
+            stype = byte4
+
+            # 데이터 메시지(stype=0)일 경우, Byte3에서 Stream과 W-Bit를 추출합니다.
+            s = byte3 & 0x7F 
+            w_bit = bool(byte3 & 0x80)
+            f = byte4 # 데이터 메시지의 경우 stype이 f와 같습니다.
             
-            # 메시지 타입 검증
+            # 메시지 타입 검증 (stype이 0일 경우 DATA_MESSAGE로 처리)
             try:
-                msg_type = HsmsMessageType(stype)
+                # 데이터 메시지(0) 또는 유효한 제어 메시지 타입인지 확인
+                msg_type = HsmsMessageType.DATA_MESSAGE if stype == 0 else HsmsMessageType(stype)
             except ValueError:
                 self.logger.error(f"Unknown message type: {stype}")
                 await self._send_reject(system_bytes, 3)  # Message not supported
@@ -281,19 +292,28 @@ class HsmsConnection:
         if self.writer.is_closing():
             raise RuntimeError("Connection is closing")
 
-        async with self._send_lock:  # 동시 전송 방지
+        async with self._send_lock:
             try:
-                # W-bit 설정
-                s_with_w_bit = s
-                if w_bit:
-                    s_with_w_bit |= 0x80
+                session_id = 0  # 예제에서는 0으로 고정
+                ptype = 0
+                
+                # ✅ [수정] 메시지 타입에 따라 헤더를 올바르게 구성합니다.
+                if msg_type == HsmsMessageType.DATA_MESSAGE:
+                    s_with_w_bit = s
+                    if w_bit:
+                        s_with_w_bit |= 0x80
+                    
+                    header_byte_3 = s_with_w_bit
+                    header_byte_4 = f
+                else: # 제어 메시지
+                    header_byte_3 = 0  # S, W-bit 사용 안함
+                    header_byte_4 = msg_type.value # Function 자리에 메시지 타입 코드를 넣음
 
-                # HSMS 헤더 구성 (Session ID=0, PType=0)
-                header = struct.pack('>HBBHHI', 0, msg_type.value, s_with_w_bit, f, 0, system_bytes)
+                # 올바른 10바이트 포맷으로 헤더를 생성합니다.
+                header = struct.pack('>HBBHI', session_id, header_byte_3, header_byte_4, ptype, system_bytes)
                 payload = header + body
                 length_bytes = len(payload).to_bytes(4, 'big')
                 
-                # 전송
                 self.writer.write(length_bytes + payload)
                 await self.writer.drain()
                 
