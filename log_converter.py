@@ -2,12 +2,11 @@
 import os
 import json
 import argparse
+import re # 👈 정규표현식 모듈 임포트
 from log_importer import get_messages_from_log
 
 def get_value_from_path(data: list, path: list):
-    """
-    SECS-II 메시지 Body(dict 리스트)와 경로(path)를 받아, 해당 경로의 값을 추출합니다.
-    """
+    """SECS-II 메시지 Body에서 경로에 해당하는 값을 추출합니다."""
     current_level = data
     try:
         for key in path:
@@ -16,9 +15,8 @@ def get_value_from_path(data: list, path: list):
             elif isinstance(current_level, dict) and isinstance(key, str):
                 current_level = current_level[key]
             else:
-                return None # 경로 타입 불일치
+                return None
         
-        # 최종 값이 리스트일 경우 첫 번째 요소 반환 (예: U2, U4 등)
         if isinstance(current_level, list):
             return current_level[0] if current_level else None
         return current_level
@@ -27,28 +25,51 @@ def get_value_from_path(data: list, path: list):
 
 def generate_message_key_suffix(msg: dict, rules: list) -> str:
     """
-    메시지 데이터와 규칙 목록을 받아, 규칙에 맞는 메시지 이름 접미사를 생성합니다.
-    (예: '_CEID[251]', '_HC_START')
+    [핵심 수정] 메시지와 규칙을 기반으로, 값과 설명을 조합하여
+    'S1F4_MDLN_CV01'과 같은 최종 메시지 이름을 생성합니다.
     """
     msg_s, msg_f = msg['s'], msg['f']
     body = msg.get('message', {}).get('body', [])
+    ascii_data = msg.get('ascii_data', '')
     
     for rule in rules:
         if rule['s'] == msg_s and rule['f'] == msg_f:
+            # 1. Body에서 값(ID) 추출
             value = get_value_from_path(body, rule.get('value_path', []))
-            if value is not None:
-                prefix = rule.get('name_prefix', '')
-                # 값이 숫자일 경우와 문자열일 경우를 구분하여 포맷팅
-                if isinstance(value, int):
-                    return f"_{prefix}[{value}]"
-                else:
-                    return f"_{prefix}_{value}"
-    return "" # 규칙에 맞는 메시지가 없으면 빈 문자열 반환
+            value_str = str(value) if value is not None else ""
+
+            # 2. AsciiData에서 설명 추출
+            desc_str = ""
+            if 'desc_regex' in rule:
+                match = re.search(rule['desc_regex'], ascii_data)
+                if match and match.groups():
+                    # 정규식의 첫 번째 그룹을 설명으로 사용하고, 공백을 '_'로 치환
+                    desc_str = match.group(1).strip().replace(' ', '_')
+
+            # 3. 값과 설명을 조합하여 최종 이름 생성
+            prefix = rule.get('name_prefix', '')
+            
+            # 이건 나중에 좀 고민을 ..
+            # if prefix and desc_str:
+            #     return f"_{prefix}_{desc_str}"
+            # elif prefix and value_str and desc_str:
+            #     return f"_{prefix}[{value_str}]_{desc_str}"
+            # elif prefix and value_str:
+            #     return f"_{prefix}[{value_str}]"
+            # elif desc_str:
+            #     return f"_{desc_str}"
+
+            if prefix and desc_str:
+                return f"_{prefix}_{desc_str}"
+            elif prefix:
+                return f"_{prefix}"
+            elif desc_str:
+                return f"_{desc_str}"
+
+    return ""
 
 def generate_assets(log_file: str, profile_file: str, rules_file: str, output_dir: str, device_id: str):
-    """
-    로그 파일로부터 시나리오와 메시지 라이브러리를 생성합니다.
-    """
+    """로그 파일로부터 시나리오와 메시지 라이브러리를 생성합니다."""
     print(f"Starting asset generation from '{log_file}'...")
     
     try:
@@ -76,12 +97,10 @@ def generate_assets(log_file: str, profile_file: str, rules_file: str, output_di
             delay = round((current_timestamp - last_timestamp) / 1000.0, 3)
         last_timestamp = current_timestamp
 
-        # ✅ [핵심 수정] 규칙 기반으로 메시지 키 접미사 생성
         msg_key_base = f"S{msg['s']}F{msg['f']}"
         suffix_from_rule = generate_message_key_suffix(msg, key_rules)
         msg_key_base += suffix_from_rule
 
-        # W-Bit 값에 따라 최종 메시지 키 완성
         w_bit_suffix = "_Request" if msg["w_bit"] else "_Reply"
         msg_key = msg_key_base + w_bit_suffix
 
@@ -99,23 +118,22 @@ def generate_assets(log_file: str, profile_file: str, rules_file: str, output_di
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    scenario_path = os.path.join(output_dir, "generated_scenario_with_rules.json")
+    scenario_path = os.path.join(output_dir, "generated_scenario_final.json")
     scenario_data = {"name": "GeneratedScenarioFromLog", "steps": scenario_steps}
     with open(scenario_path, 'w', encoding='utf-8') as f:
         json.dump(scenario_data, f, indent=4)
-    print(f"✅ Scenario with rule-based keys saved to '{scenario_path}'")
+    print(f"✅ Scenario with descriptive keys saved to '{scenario_path}'")
 
-    library_path = os.path.join(output_dir, f"Generated_{device_id}_Library_with_rules.json")
+    library_path = os.path.join(output_dir, f"Generated_{device_id}_Library_final.json")
     with open(library_path, 'w', encoding='utf-8') as f:
         json.dump(message_library, f, indent=4)
-    print(f"✅ Message library with rule-based keys saved to '{library_path}'")
+    print(f"✅ Message library with descriptive keys saved to '{library_path}'")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate SECS simulator assets from log files.")
     parser.add_argument("logfile", help="Path to the log file to be analyzed.")
     parser.add_argument("--profile", default="profile.json", help="Path to the log parsing profile JSON file.")
-    # ✅ [추가] 규칙 파일을 받을 수 있도록 인자 추가
     parser.add_argument("--rules", default="message_key_rules.json", help="Path to the message key generation rules JSON file.")
     parser.add_argument("--out", default="./generated_assets", help="Directory to save the generated files.")
     parser.add_argument("--device", default="MyDevice", help="Device ID to use in the scenario.")

@@ -3,11 +3,8 @@ import json
 import struct
 from typing import List, Dict, Any
 
-# 🤩 프로젝트의 자체 핵심 파서를 직접 사용합니다!
 from secs_simulator.core.secs_parser import parse_body
 from secs_simulator.core.models import SecsItem
-
-# universal_parser는 이제 CSV를 읽는 역할만 충실히 수행합니다.
 from secs_simulator.parsers.universal_parser import parse_log_with_profile
 
 def convert_secs_item_to_dict(item: SecsItem) -> Dict[str, Any]:
@@ -42,21 +39,14 @@ def get_messages_from_log(log_filepath: str, profile_path: str) -> List[Dict[str
             continue
 
         raw_full_hex = entry.get('BinaryData', '')
-        # 헤더(10) + Body 최소길이를 고려하여 20자 이상인 경우만 처리
-        if not raw_full_hex or len(raw_full_hex) < 20: # 10 bytes * 2 hex chars/byte
+        if not raw_full_hex or len(raw_full_hex) < 20:
             continue
             
         full_binary = bytes.fromhex(raw_full_hex)
-        
-        # 🎯 [수정] 헤더 길이를 10바이트로 수정하고, unpack 포맷을 로그 파일에 맞게 변경했습니다.
         header_bytes = full_binary[0:10]
         
         try:
-            # 포맷: SessionID(H), S+W(B), F(B), PType(H), SystemBytes(4s)
-            # 총 2 + 1 + 1 + 2 + 4 = 10 바이트
             _session_id, s_with_w_bit, f, _ptype, system_bytes_raw = struct.unpack('>HBBH4s', header_bytes)
-            
-            # 4s로 읽은 System Bytes를 정수로 변환합니다.
             system_bytes = int.from_bytes(system_bytes_raw, 'big')
         except struct.error as e:
             print(f"Skipping malformed 10-byte header: {e}")
@@ -64,14 +54,11 @@ def get_messages_from_log(log_filepath: str, profile_path: str) -> List[Dict[str
 
         w_bit = bool(s_with_w_bit & 0x80)
         s = s_with_w_bit & 0x7F
-
-        # 헤더(10바이트) 이후의 모든 데이터를 Body로 간주합니다.
         body_bytes = full_binary[10:]
         
         parsed_body_items = parse_body(body_bytes)
         body_for_json = [convert_secs_item_to_dict(item) for item in parsed_body_items]
 
-        # ✅ [추가] 숫자 타임스탬프를 추출하고 정수형으로 변환합니다.
         timestamp_str = entry.get('NumericalTimeStamp', '0')
         try:
             timestamp = int(timestamp_str)
@@ -83,7 +70,9 @@ def get_messages_from_log(log_filepath: str, profile_path: str) -> List[Dict[str
             "f": f,
             "w_bit": w_bit,
             "system_bytes": system_bytes,
-            "timestamp": timestamp, # ✅ [추가] 추출한 타임스탬프를 데이터에 포함
+            "timestamp": timestamp,
+            # ✅ [추가] AsciiData를 함께 전달합니다.
+            "ascii_data": entry.get('AsciiData', ''),
             "message": {
                 "s": s,
                 "f": f,
