@@ -239,20 +239,39 @@ class DeviceAgent:
             await self._cleanup_connection()
 
     async def _on_message_received(self, message: dict):
-        """메시지 수신 콜백"""
+        """[수정됨] 메시지 수신 콜백 (로깅 및 처리 흐름 개선)"""
         system_bytes = message.get('system_bytes')
         s, f = message.get('s', '?'), message.get('f', '?')
+        w_bit = message.get('w_bit', False)
         
-        # 대기 중인 응답 확인
+        # ✅ 1. 모든 수신 메시지를 먼저 로그로 남깁니다.
+        await self._update_status(f"Received S{s}F{f}", "green")
+
+        # ✅ 2. 이 메시지가 내가 보낸 요청에 대한 '응답'인지 확인합니다.
         if system_bytes in self._pending_replies:
             future = self._pending_replies.pop(system_bytes)
             if not future.cancelled():
                 future.set_result(message)
+            # 응답 메시지는 여기서 처리가 완료되므로, 함수를 종료합니다.
             return
         
-        # 일반 메시지 큐에 추가
+        # ✅ 3. 응답이 아니라면, 나에게 응답을 요구하는 새로운 '요청'인지 확인합니다.
+        if w_bit:
+            reply_s = s
+            reply_f = f + 1
+            reply_body = [{'type': 'B', 'value': 0}] # Acknowledge OK
+
+            command = {
+                "action": "send",
+                "s": reply_s, "f": reply_f, "w_bit": False,
+                "body": reply_body,
+                "system_bytes": system_bytes
+            }
+            await self._command_queue.put(command)
+
+        # ✅ 4. 시나리오의 'wait' 스텝 등에서 사용할 수 있도록, 수신된 요청을 큐에 넣습니다.
+        # (w_bit=False인 단방향 메시지도 여기에 포함됩니다)
         await self._incoming_message_queue.put(message)
-        await self._update_status(f"Received S{s}F{f}", "green")
 
     async def stop(self) -> None:
         """에이전트 중지"""

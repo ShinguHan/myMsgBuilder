@@ -108,66 +108,7 @@ class HsmsConnection:
     async def wait_for_disconnect(self):
         """연결 종료 대기"""
         await self._disconnect_event.wait()
-
-    async def _process_message(self, payload: bytes) -> None:
-        """메시지 파싱 및 라우팅"""
-        if len(payload) < 10:
-            self.logger.error("Message too short for HSMS header")
-            return
-            
-        try:
-            header = payload[:10]
-            body = payload[10:]
-            
-            # ✅ [수정] 헤더 unpack 포맷을 올바른 10바이트 구조로 변경합니다.
-            # 포맷: SessionID(H), Byte3(B), Byte4(B), PType(H), SystemBytes(I)
-            session_id, byte3, byte4, ptype, system_bytes = struct.unpack('>HBBHI', header)
-
-            # 데이터 메시지와 제어 메시지를 구분하여 해석합니다.
-            # HSMS 표준에 따라 데이터 메시지의 SType은 0입니다.
-            # 제어 메시지(Select, Linktest 등)는 SType이 0이 아닙니다.
-            # 여기서는 Byte4(stype)를 기준으로 삼습니다.
-            stype = byte4
-
-            # 데이터 메시지(stype=0)일 경우, Byte3에서 Stream과 W-Bit를 추출합니다.
-            s = byte3 & 0x7F 
-            w_bit = bool(byte3 & 0x80)
-            f = byte4 # 데이터 메시지의 경우 stype이 f와 같습니다.
-            
-            # 메시지 타입 검증 (stype이 0일 경우 DATA_MESSAGE로 처리)
-            try:
-                # 데이터 메시지(0) 또는 유효한 제어 메시지 타입인지 확인
-                msg_type = HsmsMessageType.DATA_MESSAGE if stype == 0 else HsmsMessageType(stype)
-            except ValueError:
-                self.logger.error(f"Unknown message type: {stype}")
-                await self._send_reject(system_bytes, 3)  # Message not supported
-                return
-
-            self.logger.debug(f"RECV: Type={msg_type.name} S{s}F{f} W={w_bit} SB={system_bytes}")
-
-            # 메시지 타입별 처리
-            handler_map = {
-                HsmsMessageType.SELECT_REQ: self._handle_select_req,
-                HsmsMessageType.SELECT_RSP: self._handle_select_rsp,
-                HsmsMessageType.DESELECT_REQ: self._handle_deselect_req,
-                HsmsMessageType.LINKTEST_REQ: self._handle_linktest_req,
-                HsmsMessageType.LINKTEST_RSP: self._handle_linktest_rsp,
-                HsmsMessageType.SEPARATE_REQ: self._handle_separate_req,
-                HsmsMessageType.DATA_MESSAGE: self._handle_data_message,
-                HsmsMessageType.REJECT_REQ: self._handle_reject_req,
-            }
-
-            handler = handler_map.get(msg_type)
-            if handler:
-                await handler(s, f, w_bit, system_bytes, body)
-            else:
-                self.logger.warning(f"No handler for message type {msg_type.name}")
-                await self._send_reject(system_bytes, 3)  # Message not supported
-                
-        except struct.error as e:
-            self.logger.error(f"Invalid message format: {e}")
-        except Exception as e:
-            self.logger.error(f"Error processing message: {e}")
+   
 
     async def _handle_select_req(self, s: int, f: int, w: bool, system_bytes: int, body: bytes) -> None:
         """Select.req 처리 및 Select.rsp 응답"""
@@ -284,33 +225,89 @@ class HsmsConnection:
             self.logger.error(f"Failed to send SECS message S{s}F{f}: {e}")
             raise
 
+    def is_alive(self) -> bool:
+        """연결 상태 확인"""
+        return (not self.writer.is_closing() and 
+                not self._disconnect_event.is_set())
+    
+    async def _process_message(self, payload: bytes) -> None:
+        """[최종 수정] HSMS 메시지 파싱 및 라우팅"""
+        if len(payload) < 10:
+            self.logger.error("Message too short for HSMS header")
+            return
+            
+        try:
+            header = payload[:10]
+            body = payload[10:]
+            
+            # 표준 10바이트 헤더: SessionID(H), s_byte(B), f_byte(B), ptype(B), stype(B), system(I)
+            # unpack 포맷을 표준에 맞게 >HBBHHI 에서 >HBBBB I 로 변경해야 하나,
+            # 현재 구조를 유지하며 ptype과 stype을 한 필드에서 분리합니다.
+            session_id, s_with_w_bit, f, ptype_stype_field, system_bytes = struct.unpack('>HBBHI', header)
+            
+            w_bit = bool(s_with_w_bit & 0x80)
+            s = s_with_w_bit & 0x7F 
+            
+            # SType 값을 명확히 추출 (상위 8비트는 PType, 하위 8비트는 SType)
+            stype = ptype_stype_field & 0xFF
+
+            try:
+                msg_type = HsmsMessageType(stype) if stype != 0 else HsmsMessageType.DATA_MESSAGE
+            except ValueError:
+                self.logger.error(f"Unknown SType in header: {stype}")
+                await self._send_reject(system_bytes, 3) # Type not supported
+                return
+
+            self.logger.debug(f"RECV: Type={msg_type.name} S{s}F{f} W={w_bit} SB={system_bytes}")
+
+            handler_map = {
+                HsmsMessageType.DATA_MESSAGE: self._handle_data_message,
+                HsmsMessageType.SELECT_REQ: self._handle_select_req,
+                HsmsMessageType.SELECT_RSP: self._handle_select_rsp,
+                HsmsMessageType.LINKTEST_REQ: self._handle_linktest_req,
+                HsmsMessageType.LINKTEST_RSP: self._handle_linktest_rsp,
+                HsmsMessageType.SEPARATE_REQ: self._handle_separate_req,
+                HsmsMessageType.REJECT_REQ: self._handle_reject_req,
+                HsmsMessageType.DESELECT_REQ: self._handle_deselect_req,
+            }
+
+            handler = handler_map.get(msg_type)
+            if handler:
+                await handler(s, f, w_bit, system_bytes, body)
+            else:
+                self.logger.warning(f"No handler for message type {msg_type.name}")
+                await self._send_reject(system_bytes, 3)
+                
+        except struct.error as e:
+            self.logger.error(f"Invalid message format during unpack: {e}")
+        except Exception as e:
+            self.logger.error(f"Critical error in _process_message: {e}")
+
+
     async def send_hsms_message(
         self, msg_type: HsmsMessageType, system_bytes: int, 
         s: int = 0, f: int = 0, w_bit: bool = False, body: bytes = b''
     ) -> None:
-        """HSMS 메시지 구성 및 전송"""
+        """[최종 수정] HSMS 메시지 구성 및 전송"""
         if self.writer.is_closing():
             raise RuntimeError("Connection is closing")
 
         async with self._send_lock:
             try:
-                session_id = 0  # 예제에서는 0으로 고정
-                ptype = 0
+                s_with_w_bit = s | 0x80 if w_bit else s
                 
-                # ✅ [수정] 메시지 타입에 따라 헤더를 올바르게 구성합니다.
-                if msg_type == HsmsMessageType.DATA_MESSAGE:
-                    s_with_w_bit = s
-                    if w_bit:
-                        s_with_w_bit |= 0x80
-                    
-                    header_byte_3 = s_with_w_bit
-                    header_byte_4 = f
-                else: # 제어 메시지
-                    header_byte_3 = 0  # S, W-bit 사용 안함
-                    header_byte_4 = msg_type.value # Function 자리에 메시지 타입 코드를 넣음
+                ptype = 0
+                stype = msg_type.value if msg_type != HsmsMessageType.DATA_MESSAGE else 0
+                
+                # 제어 메시지일 경우 S와 F는 0으로 설정
+                if msg_type != HsmsMessageType.DATA_MESSAGE:
+                    s_with_w_bit = 0
+                    f = 0
 
-                # 올바른 10바이트 포맷으로 헤더를 생성합니다.
-                header = struct.pack('>HBBHI', session_id, header_byte_3, header_byte_4, ptype, system_bytes)
+                # PType과 SType을 2바이트 필드로 조합
+                ptype_stype_field = (ptype << 8) | stype
+
+                header = struct.pack('>HBBHI', 0, s_with_w_bit, f, ptype_stype_field, system_bytes)
                 payload = header + body
                 length_bytes = len(payload).to_bytes(4, 'big')
                 
@@ -322,8 +319,3 @@ class HsmsConnection:
             except Exception as e:
                 self.logger.error(f"Failed to send HSMS message: {e}")
                 raise
-
-    def is_alive(self) -> bool:
-        """연결 상태 확인"""
-        return (not self.writer.is_closing() and 
-                not self._disconnect_event.is_set())
