@@ -442,6 +442,16 @@ class DeviceAgent:
 
     async def _update_status(self, status: str, color: str = "default"):
         """상태 업데이트"""
+        # 1. 색상에 기반하여 로그 레벨을 결정합니다.
+        log_level = logging.INFO
+        if color == "red":
+            log_level = logging.ERROR
+        elif color in ["yellow", "orange"]:
+            log_level = logging.WARNING
+        
+        # 2. 결정된 레벨로 로그를 기록합니다.
+        self.logger.log(log_level, status)
+        
         final_color = color
         if color == "default":
             final_color = "gray"

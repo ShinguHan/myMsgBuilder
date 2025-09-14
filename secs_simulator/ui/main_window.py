@@ -6,12 +6,18 @@ from PySide6.QtGui import QCursor
 from typing import Dict
 import asyncio
 import json
+import logging # logging 모듈 임포트
 
 from secs_simulator.engine.orchestrator import Orchestrator
 from secs_simulator.ui.device_status_widget import DeviceStatusWidget
 from secs_simulator.ui.scenario_editor.scenario_editor_widget import ScenarioEditorWidget
 from secs_simulator.engine.scenario_manager import ScenarioManager
 from secs_simulator.ui.add_device_dialog import AddDeviceDialog
+
+from secs_simulator.ui.log_viewer import LogViewer # 새로 만든 LogViewer 임포트
+
+
+DEVICE_CONFIG_PATH = './secs_simulator/engine/devices.json'
 
 class MainWindow(QMainWindow):
     agent_status_updated = Signal(str, str, str)
@@ -23,7 +29,7 @@ class MainWindow(QMainWindow):
         
         # 2. ✅ [핵심 수정] 장비 설정 파일을 먼저 로드합니다.
         # main.py가 있는 위치 기준으로 상대 경로를 지정합니다.
-        device_configs = orchestrator.load_device_configs('./secs_simulator/engine/devices.json')
+        device_configs = orchestrator.load_device_configs(DEVICE_CONFIG_PATH)
 
         
         self.scenario_manager = ScenarioManager(
@@ -102,11 +108,12 @@ class MainWindow(QMainWindow):
         right_splitter = QWidget()
         right_layout = QVBoxLayout(right_splitter)
         self.editor_widget = ScenarioEditorWidget(self.scenario_manager, device_configs)
-        self.log_display = QTextEdit()
-        self.log_display.setReadOnly(True)
+        
+        self.log_viewer  = LogViewer()
+        # self.log_display.setReadOnly(True)
         editor_log_splitter = QVBoxLayout()
         editor_log_splitter.addWidget(self.editor_widget, 3)
-        editor_log_splitter.addWidget(self.log_display, 1)
+        editor_log_splitter.addWidget(self.log_viewer, 1)
         
         scenario_control_layout = QHBoxLayout()
         load_button = QPushButton("📂 Load Scenario...")
@@ -165,13 +172,13 @@ class MainWindow(QMainWindow):
             self.toggle_button.setText("◀ Devices")
 
     def start_agents(self):
-        self.log_display.append("--- Starting all agents... ---")
+        logging.info("--- Starting all agents... ---") # append -> logging.info
         asyncio.create_task(self.orchestrator.start_all_agents())
         self.start_button.setEnabled(False)
         self.stop_button.setEnabled(True)
 
     def stop_agents(self):
-        self.log_display.append("--- Stopping all agents... ---")
+        logging.info("--- Stopping all agents... ---") # append -> logging.info
         asyncio.create_task(self.orchestrator.stop_all_agents())
         self.start_button.setEnabled(True)
         self.stop_button.setEnabled(False)
@@ -204,9 +211,7 @@ class MainWindow(QMainWindow):
                 self.device_list_layout.insertWidget(self.device_list_layout.count() - 1, widget)
 
     @Slot(str, str, str)
-    def on_agent_status_update(self, device_id: str, status: str, color: str):
-        log_message = f"[{device_id}] {status}"
-        self.log_display.append(log_message)
+    def on_agent_status_update(self, device_id: str, status: str, color: str):        
         if device_id in self.device_widgets:
             # ✅ [버그 수정] 'Stopped'가 아닐 경우 모두 활성 상태로 간주하여 안정성 향상
             is_active = "Stopped" not in status
@@ -244,11 +249,11 @@ class MainWindow(QMainWindow):
                 success = self.orchestrator.add_device(device_id, config)
                 if success:
                     # UI 갱신
-                    new_configs = self.orchestrator.get_device_configs()
+                    new_configs = self.orchestrator.load_device_configs(DEVICE_CONFIG_PATH)
                     self.populate_device_widgets(new_configs)
-                    self.log_display.append(f"--- Device '{device_id}' added successfully. ---")
+                    logging.info(f"--- Device '{device_id}' added successfully. ---")
                 else:
-                    self.log_display.append(f"--- Failed to add device '{device_id}'. Check logs. ---")
+                    logging.error(f"--- Failed to add device '{device_id}'. Check logs. ---")
 
     def load_and_populate_libraries(self):
         all_libs = self.scenario_manager.get_all_message_libraries()
@@ -257,10 +262,10 @@ class MainWindow(QMainWindow):
     def run_edited_scenario(self):
         scenario_data = self.editor_widget.export_to_scenario_data()
         if not scenario_data or not scenario_data.get("steps"):
-            self.log_display.append("--- Scenario is empty. Add steps to the timeline. ---")
+            logging.warning("--- Scenario is empty. Add steps to the timeline. ---")
             return
             
-        self.log_display.append(f"--- Running scenario '{scenario_data['name']}'... ---")
+        logging.info(f"--- Running scenario '{scenario_data['name']}'... ---")
         self.orchestrator.run_scenario(scenario_data)
 
     def save_scenario_to_file(self):
@@ -272,9 +277,9 @@ class MainWindow(QMainWindow):
         scenario_data = self.editor_widget.export_to_master_scenario()
         success = self.scenario_manager.save_scenario(scenario_data, file_path)
         if success:
-            self.log_display.append(f"--- Scenario saved to {file_path} ---")
+            logging.info(f"--- Scenario saved to {file_path} ---")
         else:
-            self.log_display.append(f"--- Failed to save scenario. ---")
+            logging.error(f"--- Failed to save scenario. ---")
             
     def load_scenario_from_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -286,6 +291,6 @@ class MainWindow(QMainWindow):
             with open(file_path, 'r', encoding='utf-8') as f:
                 scenario_data = json.load(f)
             self.editor_widget.load_from_scenario_data(scenario_data)
-            self.log_display.append(f"--- Scenario loaded from {file_path} ---")
+            logging.info(f"--- Scenario loaded from {file_path} ---")
         except Exception as e:
-            self.log_display.append(f"--- Error loading scenario: {e} ---")
+            logging.error(f"--- Error loading scenario: {e} ---")

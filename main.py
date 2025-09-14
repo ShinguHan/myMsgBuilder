@@ -8,6 +8,8 @@ from PySide6.QtCore import QFile, QTextStream
 
 from secs_simulator.engine.orchestrator import Orchestrator
 from secs_simulator.ui.main_window import MainWindow
+import logging # logging 모듈 추가
+from secs_simulator.ui.log_viewer import QtLogHandler # 새로 만든 핸들러 임포트
 
 async def status_update_callback(window: MainWindow, device_id: str, status: str, color: str):
     """Orchestrator가 UI 업데이트를 위해 호출할 콜백. UI의 Signal을 emit합니다."""
@@ -33,6 +35,15 @@ async def main_async(app: QApplication):
 
     # 3. 메인 윈도우 생성 및 Orchestrator와 종료 Future 연결
     window = MainWindow(orchestrator, shutdown_future)
+     # --- 로깅 설정 ---
+    # 1. Qt 핸들러를 생성합니다.
+    log_handler = QtLogHandler(window)
+    # 2. 핸들러의 log_received 시그널을 MainWindow에 있는 로그 뷰어의 add_log_record 슬롯에 연결합니다.
+    log_handler.log_received.connect(window.log_viewer.add_log_record)
+    # 3. 모든 로그가 이 핸들러를 사용하도록 기본 로거를 설정합니다.
+    logging.basicConfig(level=logging.DEBUG, handlers=[log_handler])
+
+    # --- 로깅 설정 끝 ---
     window.show()
 
     # 4. 종료 신호를 받을 때까지 대기

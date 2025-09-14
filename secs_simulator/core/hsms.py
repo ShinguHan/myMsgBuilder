@@ -5,8 +5,8 @@ from enum import IntEnum
 
 import time # time 모듈 임포트
 from typing import Optional, Callable, Awaitable
-
-from .secs_parser import parse_body
+import json # JSON 모듈 임포트
+from .secs_parser import parse_body, SecsItem # SecsItem 임포트
 from .secs_builder import build_secs_body
 
 class HsmsMessageType(IntEnum):
@@ -20,6 +20,13 @@ class HsmsMessageType(IntEnum):
     LINKTEST_RSP = 6
     REJECT_REQ = 7
     SEPARATE_REQ = 9
+
+# --- SecsItem을 JSON으로 변환하기 위한 헬퍼 함수 ---
+def secs_item_to_dict(item: SecsItem) -> dict:
+    """SecsItem 객체를 JSON 직렬화 가능한 딕셔너리로 변환합니다."""
+    if isinstance(item.value, list) and all(isinstance(i, SecsItem) for i in item.value):
+        return {"type": item.type, "value": [secs_item_to_dict(sub_item) for sub_item in item.value]}
+    return {"type": item.type, "value": item.value}
 
 class HsmsConnection:
     """개선된 HSMS 연결 관리 클래스"""
@@ -181,6 +188,11 @@ class HsmsConnection:
         try:
             parsed_body = parse_body(body) if body else []
             
+            # ✅ [핵심 추가] 수신된 메시지의 Body 내용을 DEBUG 레벨로 로깅합니다.
+            body_for_log = [secs_item_to_dict(item) for item in parsed_body]
+            self.logger.debug(f"RECV S{s}F{f} Body: {json.dumps(body_for_log)}")
+
+
             message = {
                 's': s, 'f': f, 'w_bit': w,
                 'system_bytes': system_bytes,
@@ -218,6 +230,9 @@ class HsmsConnection:
             raise RuntimeError("Connection not selected")
             
         try:
+            # ✅ [핵심 추가] 전송할 메시지의 Body 내용을 DEBUG 레벨로 로깅합니다.
+            self.logger.debug(f"SEND S{s}F{f} Body: {json.dumps(body_obj or [])}")
+            
             body_bytes = build_secs_body(body_obj or [])
             await self.send_hsms_message(
                 HsmsMessageType.DATA_MESSAGE, 
