@@ -1,20 +1,21 @@
+# secs_simulator/ui/main_window.py
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFileDialog,
-                               QPushButton, QTextEdit, QScrollArea, QFrame, QMenu
+                               QPushButton, QScrollArea, QFrame, QMessageBox
                                )
-from PySide6.QtCore import Signal, Slot, QEasingCurve, Qt,QPropertyAnimation, QParallelAnimationGroup
+from PySide6.QtCore import Signal, Slot, QEasingCurve, Qt, QPropertyAnimation, QParallelAnimationGroup
 from PySide6.QtGui import QCursor
 from typing import Dict
 import asyncio
 import json
-import logging # logging 모듈 임포트
+import logging
 
 from secs_simulator.engine.orchestrator import Orchestrator
 from secs_simulator.ui.device_status_widget import DeviceStatusWidget
 from secs_simulator.ui.scenario_editor.scenario_editor_widget import ScenarioEditorWidget
 from secs_simulator.engine.scenario_manager import ScenarioManager
 from secs_simulator.ui.add_device_dialog import AddDeviceDialog
-from .log_viewer_window import LogViewerWindow # 새로 만든 윈도우 임포트
-from secs_simulator.ui.log_viewer import LogViewer # 새로 만든 LogViewer 임포트
+from .log_viewer_window import LogViewerWindow
+from secs_simulator.ui.log_viewer import LogViewer
 
 
 DEVICE_CONFIG_PATH = './secs_simulator/engine/devices.json'
@@ -26,20 +27,15 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.orchestrator = orchestrator
         self.shutdown_future = shutdown_future
-
-        # ✅ 새 로그 뷰어 윈도우를 멤버 변수로 생성합니다.
         self.log_viewer_window = LogViewerWindow()
-        
-        # 2. ✅ [핵심 수정] 장비 설정 파일을 먼저 로드합니다.
-        # main.py가 있는 위치 기준으로 상대 경로를 지정합니다.
         device_configs = orchestrator.load_device_configs(DEVICE_CONFIG_PATH)
-
-        
         self.scenario_manager = ScenarioManager(
             device_configs=device_configs,
             message_library_dir='./resources/messages'
         )
         self.device_widgets: Dict[str, DeviceStatusWidget] = {}
+        # ✅ [추가] 선택된 디바이스 ID를 추적하기 위한 변수
+        self.selected_device_id: str | None = None
 
         self.setWindowTitle("SECS/HSMS Multi-Device Simulator")
         self.setGeometry(100, 100, 1600, 900)
@@ -53,17 +49,14 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(main_widget)
         main_layout = QHBoxLayout(main_widget)
 
-        # --- Left Panel ---
         self.left_panel = QFrame()
         self.left_panel.setObjectName("leftPanel")
         self.left_panel.setMinimumWidth(300)
         self.left_panel.setMaximumWidth(300)
-
         left_layout = QVBoxLayout(self.left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(10)
 
-        # 1. 패널 숨김 버튼 추가
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(10, 5, 10, 5)
         self.toggle_button = QPushButton("◀ Devices")
@@ -71,7 +64,6 @@ class MainWindow(QMainWindow):
         self.toggle_button.setObjectName("toggleButton")
         self.toggle_button.setStyleSheet("padding: 8px 10px;")
         header_layout.addWidget(self.toggle_button)
-        # ✅ [수정] 버튼을 찌그러뜨리던 불필요한 Stretch 제거
         left_layout.addLayout(header_layout)
         
         self.collapsible_container = QWidget()
@@ -89,7 +81,6 @@ class MainWindow(QMainWindow):
         control_layout.addWidget(self.stop_button)
         collapsible_layout.addLayout(control_layout)
 
-        # 디바이스 목록 (세로 정렬)
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_content = QWidget()
@@ -99,21 +90,37 @@ class MainWindow(QMainWindow):
         scroll_area.setWidget(scroll_content)
         collapsible_layout.addWidget(scroll_area)
         
-        left_layout.addWidget(self.collapsible_container)
+        # ✅ [수정] 디바이스 관리 패널 UI 추가
+        management_frame = QFrame()
+        management_frame.setObjectName("managementFrame")
+        device_management_layout = QHBoxLayout(management_frame)
+        device_management_layout.setContentsMargins(0, 5, 0, 0)
         
-        # ✅ [수정] 모든 위젯을 상단으로 밀어 올리는 Stretch 추가
+        add_button = QPushButton("➕ Add")
+        edit_button = QPushButton("✏️ Edit")
+        delete_button = QPushButton("🗑️ Delete")
+        
+        add_button.setToolTip("Add a new device configuration.")
+        edit_button.setToolTip("Edit the selected device.")
+        delete_button.setToolTip("Delete the selected device.")
+        
+        add_button.clicked.connect(self.add_new_device)
+        edit_button.clicked.connect(self.edit_selected_device)
+        delete_button.clicked.connect(self.delete_selected_device)
+
+        device_management_layout.addWidget(add_button)
+        device_management_layout.addWidget(edit_button)
+        device_management_layout.addWidget(delete_button)
+        collapsible_layout.addWidget(management_frame)
+
+        left_layout.addWidget(self.collapsible_container)
         left_layout.addStretch()
 
-        scroll_content.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        scroll_content.customContextMenuRequested.connect(self.show_device_context_menu)
-        
-        # --- Right Panel ---
         right_splitter = QWidget()
         right_layout = QVBoxLayout(right_splitter)
         self.editor_widget = ScenarioEditorWidget(self.scenario_manager, device_configs)
         
-        self.log_viewer  = LogViewer()
-        # self.log_display.setReadOnly(True)
+        self.log_viewer = LogViewer()
         editor_log_splitter = QVBoxLayout()
         editor_log_splitter.addWidget(self.editor_widget, 3)
         editor_log_splitter.addWidget(self.log_viewer, 1)
@@ -123,8 +130,6 @@ class MainWindow(QMainWindow):
         save_button = QPushButton("💾 Save Scenario...")
         self.run_button = QPushButton("▶ Run Edited Scenario")
         self.run_button.setStyleSheet("background-color: #3478F6; color: white; font-weight: bold;")
-
-        # ✅ "Show Logs" 버튼을 새로 추가합니다.
         self.show_log_button = QPushButton("📄 Show Logs")
         self.show_log_button.clicked.connect(self.log_viewer_window.show)
 
@@ -134,10 +139,9 @@ class MainWindow(QMainWindow):
         scenario_control_layout.addWidget(load_button)
         scenario_control_layout.addWidget(save_button)
         scenario_control_layout.addStretch()
-        scenario_control_layout.addWidget(self.show_log_button) # 버튼 배치
+        scenario_control_layout.addWidget(self.show_log_button)
         scenario_control_layout.addWidget(self.run_button)
 
-        # ✅ 우측 패널 레이아웃 재구성 (기존 로그뷰어 제거)
         right_layout.addWidget(self.editor_widget)
         right_layout.addLayout(scenario_control_layout)
 
@@ -146,6 +150,7 @@ class MainWindow(QMainWindow):
         self.editor_widget.manual_send_requested.connect(self.orchestrator.send_single_message)
 
     def toggle_left_panel(self):
+        # ... (기존 코드와 동일)
         start_width = self.left_panel.width()
         is_collapsing = start_width > 50
         end_width = 50 if is_collapsing else 300
@@ -182,94 +187,161 @@ class MainWindow(QMainWindow):
             self.toggle_button.setText("◀ Devices")
 
     def start_agents(self):
-        logging.info("--- Starting all agents... ---") # append -> logging.info
+        # ... (기존 코드와 동일)
+        logging.info("--- Starting all agents... ---")
         asyncio.create_task(self.orchestrator.start_all_agents())
         self.start_button.setEnabled(False)
         self.stop_button.setEnabled(True)
 
     def stop_agents(self):
-        logging.info("--- Stopping all agents... ---") # append -> logging.info
+        # ... (기존 코드와 동일)
+        logging.info("--- Stopping all agents... ---")
         asyncio.create_task(self.orchestrator.stop_all_agents())
         self.start_button.setEnabled(True)
         self.stop_button.setEnabled(False)
 
     def closeEvent(self, event):
+        # ... (기존 코드와 동일)
         if not self.shutdown_future.done():
             self.shutdown_future.set_result(True)
         event.accept()
 
     def populate_device_widgets(self, device_configs: dict):
-        # 기존 위젯 클리어
         for i in reversed(range(self.device_list_layout.count() -1)):
             widget_to_remove = self.device_list_layout.itemAt(i).widget()
             if widget_to_remove:
                 widget_to_remove.setParent(None)
         self.device_widgets.clear()
+        
+        self.selected_device_id = None # 목록 새로고침 시 선택 해제
 
-        # 새 설정으로 위젯 재생성
         for device_id, config in device_configs.items():
             if device_id not in self.device_widgets:
-                # ✅ [버그 수정] DeviceStatusWidget 생성자에 connection_mode 인자를 전달합니다.
                 widget = DeviceStatusWidget(
                     device_id, 
                     config['host'], 
                     config['port'],
-                    config.get('connection_mode', 'Passive') # 기본값으로 'Passive' 사용
+                    config.get('connection_mode', 'Passive')
                 )
-                widget.toggled.connect(self.on_device_toggled) # 2. 개별 On/Off
+                widget.toggled.connect(self.on_device_toggled)
+                # ✅ [수정] 위젯의 클릭 이벤트를 재정의하여 선택 로직을 연결
+                widget.mousePressEvent = lambda event, dev_id=device_id: self._on_device_selected(dev_id, event)
                 self.device_widgets[device_id] = widget
                 self.device_list_layout.insertWidget(self.device_list_layout.count() - 1, widget)
 
+    @Slot(str)
+    def _on_device_selected(self, device_id: str, event):
+        """✅ [추가] 디바이스 위젯 클릭 시 호출되어 선택 상태를 관리합니다."""
+        # 1. 모든 위젯의 선택 효과(테두리)를 초기화합니다.
+        for dev_id, widget in self.device_widgets.items():
+            # QSS의 기본 스타일을 유지하면서 테두리만 변경
+            is_selected = (dev_id == device_id)
+            if is_selected:
+                widget.setStyleSheet("#statusCard { border: 1.5px solid #3478F6; }")
+            else:
+                widget.setStyleSheet("") # 기본 스타일로 복원
+
+        # 2. 현재 선택된 디바이스 ID를 업데이트합니다.
+        self.selected_device_id = device_id
+        logging.debug(f"Device '{self.selected_device_id}' selected.")
+        
+        # 3. 원래의 mousePressEvent를 호출하여 다른 기능(예: 드래그)에 영향을 주지 않도록 합니다.
+        QFrame.mousePressEvent(self.device_widgets[device_id], event)
+
     @Slot(str, str, str)
     def on_agent_status_update(self, device_id: str, status: str, color: str):        
+        # ... (기존 코드와 동일)
         if device_id in self.device_widgets:
-            # ✅ [버그 수정] 'Stopped'가 아닐 경우 모두 활성 상태로 간주하여 안정성 향상
             is_active = "Stopped" not in status
             self.device_widgets[device_id].update_status(status, color, is_active)
 
     @Slot(str, bool)
     def on_device_toggled(self, device_id: str, is_on: bool):
+        # ... (기존 코드와 동일)
         if is_on:
             asyncio.create_task(self.orchestrator.start_agent(device_id))
         else:
             asyncio.create_task(self.orchestrator.stop_agent(device_id))
-
-    def show_device_context_menu(self, position):
-        menu = QMenu()
-        add_action = menu.addAction("➕ Add New Device")
-        action = menu.exec(QCursor.pos())
-        if action == add_action:
-            self.add_new_device()
-
+    
     def add_new_device(self):
         dialog = AddDeviceDialog(self)
         if dialog.exec():
             device_info = dialog.get_device_info()
             if device_info:
-                device_id = device_info["id"]
-                # ✅ [버그 수정] connection_mode를 config에 포함하여 전달
-                config = {
-                    "host": device_info["host"],
-                    "port": device_info["port"],
-                    "type": device_info["type"],
-                    "connection_mode": device_info["connection_mode"]
-                }
+                device_id = device_info.pop("id") # config와 id 분리
                 
-                # Orchestrator에 추가 및 파일 저장
-                success = self.orchestrator.add_device(device_id, config)
+                success = self.orchestrator.add_device(device_id, device_info)
                 if success:
-                    # UI 갱신
                     new_configs = self.orchestrator.load_device_configs(DEVICE_CONFIG_PATH)
                     self.populate_device_widgets(new_configs)
                     logging.info(f"--- Device '{device_id}' added successfully. ---")
                 else:
-                    logging.error(f"--- Failed to add device '{device_id}'. Check logs. ---")
+                    QMessageBox.warning(self, "Error", f"Failed to add device '{device_id}'. The ID might already exist.")
+
+    def edit_selected_device(self):
+        """✅ [추가] 선택된 디바이스의 설정을 수정합니다."""
+        if not self.selected_device_id:
+            QMessageBox.information(self, "Edit Device", "Please select a device to edit from the list.")
+            return
+
+        config = self.orchestrator._device_configs.get(self.selected_device_id)
+        if not config:
+            return
+
+        dialog = AddDeviceDialog(self)
+        dialog.setWindowTitle("Edit Device")
+        # 기존 정보를 다이얼로그에 채워 넣습니다.
+        dialog.id_input.setText(self.selected_device_id)
+        dialog.type_input.setCurrentText(config.get('type', ''))
+        dialog.connection_mode_input.setCurrentText(config.get('connection_mode', 'Passive'))
+        dialog.host_input.setText(config.get('host', '127.0.0.1'))
+        dialog.port_input.setValue(config.get('port', 5000))
+        dialog.t3_input.setValue(config.get('t3', 10))
+        dialog.t5_input.setValue(config.get('t5', 10))
+        dialog.t6_input.setValue(config.get('t6', 5))
+        dialog.t7_input.setValue(config.get('t7', 10))
+        
+        if dialog.exec():
+            new_info = dialog.get_device_info()
+            if new_info:
+                new_device_id = new_info.pop("id")
+                asyncio.create_task(self.orchestrator.edit_device(self.selected_device_id, new_device_id, new_info))
+                
+                # UI 즉시 갱신
+                new_configs = self.orchestrator.load_device_configs(DEVICE_CONFIG_PATH)
+                self.populate_device_widgets(new_configs)
+                logging.info(f"--- Device '{self.selected_device_id}' was updated to '{new_device_id}'. ---")
+
+    def delete_selected_device(self):
+        """✅ [추가] 선택된 디바이스를 삭제합니다."""
+        if not self.selected_device_id:
+            QMessageBox.information(self, "Delete Device", "Please select a device to delete from the list.")
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Confirm Deletion",
+            f"Are you sure you want to delete the device '{self.selected_device_id}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            asyncio.create_task(self.orchestrator.delete_device(self.selected_device_id))
+            
+            # UI 즉시 갱신
+            new_configs = self.orchestrator.load_device_configs(DEVICE_CONFIG_PATH)
+            self.populate_device_widgets(new_configs)
+            logging.info(f"--- Device '{self.selected_device_id}' was deleted. ---")
+            self.selected_device_id = None
 
     def load_and_populate_libraries(self):
+        # ... (기존 코드와 동일)
         all_libs = self.scenario_manager.get_all_message_libraries()
         self.editor_widget.library_view.populate(all_libs)
 
     def run_edited_scenario(self):
+        # ... (기존 코드와 동일)
         scenario_data = self.editor_widget.export_to_scenario_data()
         if not scenario_data or not scenario_data.get("steps"):
             logging.warning("--- Scenario is empty. Add steps to the timeline. ---")
@@ -279,9 +351,8 @@ class MainWindow(QMainWindow):
         self.orchestrator.run_scenario(scenario_data)
 
     def save_scenario_to_file(self):
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "Save Master Scenario", "./resources/scenarios", "JSON Files (*.json)"
-        )
+        # ... (기존 코드와 동일)
+        file_path, _ = QFileDialog.getSaveFileName(self, "Save Master Scenario", "./resources/scenarios", "JSON Files (*.json)")
         if not file_path: return
 
         scenario_data = self.editor_widget.export_to_master_scenario()
@@ -292,9 +363,8 @@ class MainWindow(QMainWindow):
             logging.error(f"--- Failed to save scenario. ---")
             
     def load_scenario_from_file(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Load Master Scenario", "./resources/scenarios", "JSON Files (*.json)"
-        )
+        # ... (기존 코드와 동일)
+        file_path, _ = QFileDialog.getOpenFileName(self, "Load Master Scenario", "./resources/scenarios", "JSON Files (*.json)")
         if not file_path: return
 
         try:

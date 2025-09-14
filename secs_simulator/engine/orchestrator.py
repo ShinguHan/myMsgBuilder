@@ -192,3 +192,44 @@ class Orchestrator:
             w_bit=message.get('w_bit', False),
             body=message.get('body')
         ))
+
+    async def edit_device(self, old_device_id: str, new_device_id: str, config: dict) -> bool:
+        """✅ [추가] 디바이스 설정을 수정합니다."""
+        # 1. 기존 에이전트가 있으면 정지시킵니다.
+        if old_device_id in self._agents:
+            await self._agents[old_device_id].stop()
+            del self._agents[old_device_id]
+        
+        # 2. 설정 딕셔너리를 업데이트합니다. ID가 변경되었을 수 있습니다.
+        if old_device_id in self._device_configs:
+            del self._device_configs[old_device_id]
+        self._device_configs[new_device_id] = config
+        
+        # 3. 새로운 설정으로 에이전트를 다시 생성합니다.
+        agent = DeviceAgent(
+            device_id=new_device_id,
+            host=config['host'],
+            port=config['port'],
+            connection_mode=config.get('connection_mode', 'Passive'),
+            status_callback=self._status_callback,
+            t3=config.get('t3', 10),
+            t5=config.get('t5', 10),
+            t6=config.get('t6', 5),
+            t7=config.get('t7', 10)
+        )
+        self._agents[new_device_id] = agent
+        
+        # 4. 변경된 내용을 파일에 저장합니다.
+        return self.save_device_configs()
+
+    async def delete_device(self, device_id: str) -> bool:
+        """✅ [추가] 디바이스를 삭제합니다."""
+        if device_id in self._agents:
+            await self._agents[device_id].stop()
+            del self._agents[device_id]
+        
+        if device_id in self._device_configs:
+            del self._device_configs[device_id]
+            return self.save_device_configs()
+            
+        return False
