@@ -1,0 +1,22 @@
+{
+    "rules": [
+        {
+            "s": 6,
+            "f": 11,
+            "name_prefix": "CEID",
+            "value_path": [0, "value", 1, "value", 0]
+        },
+        {
+            "s": 2,
+            "f": 41,
+            "name_prefix": "HC",
+            "value_path": [0, "value", 0, "value"]
+        },
+        {
+            "s": 1,
+            "f": 3,
+            "name_prefix": "SV",
+            "value_path": [0, "value"]
+        }
+    ]
+}
