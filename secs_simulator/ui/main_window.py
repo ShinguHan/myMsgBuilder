@@ -13,7 +13,7 @@ from secs_simulator.ui.device_status_widget import DeviceStatusWidget
 from secs_simulator.ui.scenario_editor.scenario_editor_widget import ScenarioEditorWidget
 from secs_simulator.engine.scenario_manager import ScenarioManager
 from secs_simulator.ui.add_device_dialog import AddDeviceDialog
-
+from .log_viewer_window import LogViewerWindow # 새로 만든 윈도우 임포트
 from secs_simulator.ui.log_viewer import LogViewer # 새로 만든 LogViewer 임포트
 
 
@@ -26,6 +26,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.orchestrator = orchestrator
         self.shutdown_future = shutdown_future
+
+        # ✅ 새 로그 뷰어 윈도우를 멤버 변수로 생성합니다.
+        self.log_viewer_window = LogViewerWindow()
         
         # 2. ✅ [핵심 수정] 장비 설정 파일을 먼저 로드합니다.
         # main.py가 있는 위치 기준으로 상대 경로를 지정합니다.
@@ -120,15 +123,22 @@ class MainWindow(QMainWindow):
         save_button = QPushButton("💾 Save Scenario...")
         self.run_button = QPushButton("▶ Run Edited Scenario")
         self.run_button.setStyleSheet("background-color: #3478F6; color: white; font-weight: bold;")
+
+        # ✅ "Show Logs" 버튼을 새로 추가합니다.
+        self.show_log_button = QPushButton("📄 Show Logs")
+        self.show_log_button.clicked.connect(self.log_viewer_window.show)
+
         load_button.clicked.connect(self.load_scenario_from_file)
         save_button.clicked.connect(self.save_scenario_to_file)
         self.run_button.clicked.connect(self.run_edited_scenario)
         scenario_control_layout.addWidget(load_button)
         scenario_control_layout.addWidget(save_button)
         scenario_control_layout.addStretch()
+        scenario_control_layout.addWidget(self.show_log_button) # 버튼 배치
         scenario_control_layout.addWidget(self.run_button)
 
-        right_layout.addLayout(editor_log_splitter)
+        # ✅ 우측 패널 레이아웃 재구성 (기존 로그뷰어 제거)
+        right_layout.addWidget(self.editor_widget)
         right_layout.addLayout(scenario_control_layout)
 
         main_layout.addWidget(self.left_panel)

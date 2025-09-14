@@ -1,7 +1,7 @@
 # secs_simulator/ui/log_viewer.py
 
 import logging
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, 
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QLineEdit,
                                QHeaderView, QAbstractItemView, QComboBox, QHBoxLayout, QLabel)
 from PySide6.QtCore import QObject, Signal, Slot
 from PySide6.QtGui import QColor, QBrush
@@ -45,6 +45,14 @@ class LogViewer(QWidget):
         self.level_filter.currentIndexChanged.connect(self.apply_filter)
         filter_layout.addWidget(self.level_filter)
         filter_layout.addStretch()
+
+        # ✅ [핵심 추가] 텍스트 필터
+        filter_layout.addWidget(QLabel("Filter Text:"))
+        self.text_filter_input = QLineEdit()
+        self.text_filter_input.setPlaceholderText("Enter text to filter logs...")
+        self.text_filter_input.textChanged.connect(self.apply_filter) # 텍스트 변경 시 바로 필터링
+        filter_layout.addWidget(self.text_filter_input)
+
         layout.addLayout(filter_layout)
 
         # 로그를 표시할 테이블 위젯
@@ -62,7 +70,7 @@ class LogViewer(QWidget):
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)         # Message
 
         layout.addWidget(self.table)
-        self.apply_filter(0) # 초기 필터 적용
+        self.apply_filter() # 초기 필터 적용
 
     @Slot(object)
     def add_log_record(self, record: logging.LogRecord):
@@ -85,22 +93,42 @@ class LogViewer(QWidget):
             item.setForeground(QBrush(color))
             self.table.setItem(row_position, i, item)
 
-        # 필터링 로직: 현재 필터 레벨에 맞지 않으면 행을 숨김
-        selected_level_str = self.level_filter.currentText()
-        selected_level_val = logging.getLevelName(selected_level_str)
-        if record.levelno < selected_level_val:
-            self.table.setRowHidden(row_position, True)
+        # 행 추가 후, 현재 필터 조건에 따라 바로 보이거나 숨겨지도록 설정
+        self.apply_filter_to_row(row_position)
+
+        # # 필터링 로직: 현재 필터 레벨에 맞지 않으면 행을 숨김
+        # selected_level_str = self.level_filter.currentText()
+        # selected_level_val = logging.getLevelName(selected_level_str)
+        # if record.levelno < selected_level_val:
+        #     self.table.setRowHidden(row_position, True)
 
         self.table.scrollToBottom()
 
-    def apply_filter(self, index):
-        """콤보박스 선택에 따라 로그 필터를 적용하는 슬롯"""
+    @Slot()
+    def apply_filter(self):
+        """테이블의 모든 행에 현재 필터 조건을 다시 적용합니다."""
+        for row in range(self.table.rowCount()):
+            self.apply_filter_to_row(row)
+
+    def apply_filter_to_row(self, row: int):
+        """특정 행에 현재 레벨 및 텍스트 필터 조건을 적용하여 보이거나 숨깁니다."""
+        # 1. 레벨 필터 조건 확인
+        level_item = self.table.item(row, 1)
         selected_level_str = self.level_filter.currentText()
         selected_level_val = logging.getLevelName(selected_level_str)
+        record_level_val = logging.getLevelName(level_item.text())
+        level_match = (record_level_val >= selected_level_val)
 
-        for row in range(self.table.rowCount()):
-            level_item = self.table.item(row, 1)
-            if level_item:
-                record_level_val = logging.getLevelName(level_item.text())
-                is_visible = (record_level_val >= selected_level_val)
-                self.table.setRowHidden(row, not is_visible)
+        # 2. 텍스트 필터 조건 확인
+        text_filter = self.text_filter_input.text().lower()
+        if not text_filter:
+            text_match = True # 필터 텍스트가 없으면 항상 통과
+        else:
+            # 모든 컬럼의 텍스트를 확인하여 필터 텍스트가 포함되는지 검사
+            text_match = any(
+                text_filter in self.table.item(row, col).text().lower() 
+                for col in range(self.table.columnCount())
+            )
+
+        # 3. 두 조건이 모두 참일 때만 행을 보이게 함
+        self.table.setRowHidden(row, not (level_match and text_match))

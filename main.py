@@ -38,8 +38,8 @@ async def main_async(app: QApplication):
      # --- 로깅 설정 ---
     # 1. Qt 핸들러를 생성합니다.
     log_handler = QtLogHandler(window)
-    # 2. 핸들러의 log_received 시그널을 MainWindow에 있는 로그 뷰어의 add_log_record 슬롯에 연결합니다.
-    log_handler.log_received.connect(window.log_viewer.add_log_record)
+    # ✅ [핵심 수정] 로그 핸들러의 시그널을 MainWindow가 가진 별도 로그 창의 슬롯에 연결합니다.
+    log_handler.log_received.connect(window.log_viewer_window.log_viewer.add_log_record)
     # 3. 모든 로그가 이 핸들러를 사용하도록 기본 로거를 설정합니다.
     logging.basicConfig(level=logging.DEBUG, handlers=[log_handler])
 
