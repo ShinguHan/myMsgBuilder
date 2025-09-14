@@ -18,3 +18,8 @@ dist/
 htmlcov/
 .coverage
 .pytest_cache/
+
+!log_converter.spec
+
+!main.spec
+
