@@ -1,3 +1,5 @@
+# secs_simulator/ui/device_status_widget.py
+
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPushButton
 from PySide6.QtCore import Qt, Signal
 
@@ -11,43 +13,49 @@ class DeviceStatusWidget(QFrame):
         
         self.setObjectName("statusCard")
 
+        # 모든 요소를 세로로 배치하는 메인 레이아웃입니다.
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(12, 8, 12, 8)
-        
-        top_layout = QHBoxLayout()
+        main_layout.setSpacing(5)
+
+        # --- 상단: 제목과 주소 ---
         mode_char = "A" if connection_mode == "Active" else "P"
-        title_label = QLabel(f"{device_id} ({mode_char})")
+        title_label = QLabel(f"<b>{device_id}</b> ({mode_char})")
         title_label.setObjectName("deviceTitle")
         
         address_label = QLabel(f"{host}:{port}")
         address_label.setObjectName("addressLabel")
-        address_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
-        self.toggle_button = QPushButton("Off")
-        self.toggle_button.setCheckable(True)
-        self.toggle_button.setChecked(False)
-        self.toggle_button.setObjectName("deviceToggleButton")
-        self.toggle_button.setFixedWidth(60)
-        self.toggle_button.toggled.connect(self.on_toggle)
+        # --- 중간: 상태 표시 ---
+        status_widget = QWidget()
+        status_layout = QHBoxLayout(status_widget)
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.setSpacing(6)
         
-        top_layout.addWidget(title_label)
-        top_layout.addStretch()
-        top_layout.addWidget(address_label)
-        top_layout.addWidget(self.toggle_button)
-        main_layout.addLayout(top_layout)
-
-        status_layout = QHBoxLayout()
-        status_layout.setContentsMargins(0, 4, 0, 0)
         self.status_indicator = QLabel()
         self.status_indicator.setObjectName("statusIndicator")
-
+        
         self.status_label = QLabel("Stopped")
         self.status_label.setObjectName("statusLabel")
 
         status_layout.addWidget(self.status_indicator)
-        status_layout.addWidget(self.status_label, 1)
-        main_layout.addLayout(status_layout)
+        status_layout.addWidget(self.status_label)
+        status_layout.addStretch() # 상태 텍스트가 왼쪽으로 붙도록
+
+        # --- 하단: 제어 버튼 ---
+        self.toggle_button = QPushButton("OFF")
+        self.toggle_button.setCheckable(True)
+        self.toggle_button.setChecked(False)
+        self.toggle_button.setObjectName("deviceToggleButton")
+        self.toggle_button.setFixedSize(60, 28)
+        self.toggle_button.toggled.connect(self.on_toggle)
         
+        # 생성된 위젯들을 메인 레이아웃에 순서대로 추가합니다.
+        main_layout.addWidget(title_label)
+        main_layout.addWidget(address_label)
+        main_layout.addWidget(status_widget)
+        main_layout.addWidget(self.toggle_button, 0, Qt.AlignmentFlag.AlignLeft) # 버튼을 좌측 정렬
+
         self.update_status("Stopped", "gray", False)
 
     def on_toggle(self, checked: bool):
@@ -68,4 +76,3 @@ class DeviceStatusWidget(QFrame):
         self.is_active = is_active
         if was_active != self.is_active:
             self.toggle_button.setChecked(is_active)
-
