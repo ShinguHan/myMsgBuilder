@@ -58,7 +58,6 @@ def get_messages_from_log(log_filepath: str, profile_path: str) -> List[Dict[str
             
             # 4s로 읽은 System Bytes를 정수로 변환합니다.
             system_bytes = int.from_bytes(system_bytes_raw, 'big')
-
         except struct.error as e:
             print(f"Skipping malformed 10-byte header: {e}")
             continue
@@ -72,11 +71,19 @@ def get_messages_from_log(log_filepath: str, profile_path: str) -> List[Dict[str
         parsed_body_items = parse_body(body_bytes)
         body_for_json = [convert_secs_item_to_dict(item) for item in parsed_body_items]
 
+        # ✅ [추가] 숫자 타임스탬프를 추출하고 정수형으로 변환합니다.
+        timestamp_str = entry.get('NumericalTimeStamp', '0')
+        try:
+            timestamp = int(timestamp_str)
+        except (ValueError, TypeError):
+            timestamp = 0
+
         processed_messages.append({
             "s": s,
             "f": f,
             "w_bit": w_bit,
             "system_bytes": system_bytes,
+            "timestamp": timestamp, # ✅ [추가] 추출한 타임스탬프를 데이터에 포함
             "message": {
                 "s": s,
                 "f": f,
