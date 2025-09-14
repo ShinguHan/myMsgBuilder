@@ -25,9 +25,13 @@ class Orchestrator:
                     device_id=device_id,
                     host=settings['host'],
                     port=settings['port'],
-                    # ✅ [수정] connection_mode를 전달 (없으면 Passive가 기본값)
                     connection_mode=settings.get('connection_mode', 'Passive'),
-                    status_callback=self._status_callback
+                    status_callback=self._status_callback,
+                    # JSON 파일에서 타임아웃 값들을 읽어서 전달
+                    t3=settings.get('t3', 10),
+                    t5=settings.get('t5', 10),
+                    t6=settings.get('t6', 5),
+                    t7=settings.get('t7', 10)
                 )
                 self._agents[device_id] = agent
             
@@ -60,15 +64,16 @@ class Orchestrator:
             device_id=device_id,
             host=config['host'],
             port=config['port'],
-            # ✅ [수정] connection_mode를 전달
             connection_mode=config.get('connection_mode', 'Passive'),
-            status_callback=self._status_callback
+            status_callback=self._status_callback,
+            # 새로 추가된 장비의 타임아웃 값도 전달
+            t3=config.get('t3', 10),
+            t5=config.get('t5', 10),
+            t6=config.get('t6', 5),
+            t7=config.get('t7', 10)
         )
         self._agents[device_id] = agent
         return self.save_device_configs()
-
-    def get_device_configs(self) -> Dict[str, Any]:
-        return self._device_configs.copy()
 
     async def start_all_agents(self) -> None:
         print("Starting all device agents...")
@@ -123,14 +128,19 @@ class Orchestrator:
                         continue
                     message = step['message']
                     w_bit = message.get('w_bit', False)
-                    sent_system_bytes = await target_agent.send_message(
+                    # ✅ [핵심 수정] 시나리오 스텝에 'timeout'이 정의되어 있으면 T3 값으로 사용
+                    t3_timeout = step.get('timeout') 
+                    
+                    sent_result = await target_agent.send_message(
                         s=message.get('s', 0),
                         f=message.get('f', 0),
                         w_bit=w_bit,
-                        body=message.get('body')
+                        body=message.get('body'),
+                        timeout=t3_timeout # timeout 값을 전달
                     )
-                    if w_bit:
-                        self._last_request_context[device_id] = sent_system_bytes
+                    
+                    if w_bit and sent_result:
+                         self._last_request_context[device_id] = sent_result.get("system_bytes")
 
                 elif 'wait_recv' in step:
                     if not target_agent:

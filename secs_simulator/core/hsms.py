@@ -2,6 +2,8 @@ import asyncio
 import struct
 import logging
 from enum import IntEnum
+
+import time # time 모듈 임포트
 from typing import Optional, Callable, Awaitable
 
 from .secs_parser import parse_body
@@ -34,7 +36,9 @@ class HsmsConnection:
         self._state_change_callback = state_change_callback
         self._disconnect_event = asyncio.Event()
         self._send_lock = asyncio.Lock()  # 동시 전송 방지
-        
+        # T5 타이머를 위한 마지막 메시지 수신/송신 시간 기록
+        self.last_message_time = time.monotonic() 
+
         self.logger = logging.getLogger(f"HSMS-{self.peername}")
         self.logger.info(f"New HSMS connection established")
 
@@ -231,7 +235,10 @@ class HsmsConnection:
                 not self._disconnect_event.is_set())
     
     async def _process_message(self, payload: bytes) -> None:
-        """[최종 수정] HSMS 메시지 파싱 및 라우팅"""
+        """HSMS 메시지 파싱 및 라우팅"""
+        self.last_message_time = time.monotonic() # 메시지 수신 시 시간 갱신
+        
+    
         if len(payload) < 10:
             self.logger.error("Message too short for HSMS header")
             return
@@ -287,10 +294,15 @@ class HsmsConnection:
     async def send_hsms_message(
         self, msg_type: HsmsMessageType, system_bytes: int, 
         s: int = 0, f: int = 0, w_bit: bool = False, body: bytes = b''
-    ) -> None:
-        """[최종 수정] HSMS 메시지 구성 및 전송"""
+    ) -> asyncio.Future | None:
+        """HSMS 메시지 구성 및 전송"""
         if self.writer.is_closing():
             raise RuntimeError("Connection is closing")
+        
+        response_future = None
+        if msg_type == HsmsMessageType.LINKTEST_REQ:
+            response_future = asyncio.Future()
+            # Linktest.req의 경우 응답을 기다리기 위해 future를 설정합니다.
 
         async with self._send_lock:
             try:
@@ -314,8 +326,13 @@ class HsmsConnection:
                 self.writer.write(length_bytes + payload)
                 await self.writer.drain()
                 
+                self.last_message_time = time.monotonic() # 메시지 전송 시 시간 갱신
+                
                 self.logger.debug(f"SENT: Type={msg_type.name} S{s}F{f} W={w_bit} SB={system_bytes}")
+
+                return response_future # Linktest를 위한 Future 반환
                 
             except Exception as e:
                 self.logger.error(f"Failed to send HSMS message: {e}")
+                if response_future: response_future.set_exception(e)
                 raise

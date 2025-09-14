@@ -21,7 +21,10 @@ class MainWindow(QMainWindow):
         self.orchestrator = orchestrator
         self.shutdown_future = shutdown_future
         
-        device_configs = self.orchestrator.get_device_configs()
+        # 2. ✅ [핵심 수정] 장비 설정 파일을 먼저 로드합니다.
+        # main.py가 있는 위치 기준으로 상대 경로를 지정합니다.
+        device_configs = orchestrator.load_device_configs('./secs_simulator/engine/devices.json')
+
         
         self.scenario_manager = ScenarioManager(
             device_configs=device_configs,

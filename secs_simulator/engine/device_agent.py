@@ -2,6 +2,7 @@ import asyncio
 import logging
 from typing import Callable, Awaitable, Optional
 from enum import Enum
+import time
 
 from secs_simulator.core.hsms import HsmsConnection, HsmsMessageType
 
@@ -20,13 +21,20 @@ class DeviceAgent:
 
     def __init__(self, device_id: str, host: str, port: int, 
                  status_callback: Callable[[str, str, str], Awaitable], 
-                 connection_mode: str = "Passive"):
+                 connection_mode: str = "Passive",
+                 t3: int = 10, t5: int = 10, t6: int = 5, t7: int = 10): # 타임아웃 파라미터 추가
         self.device_id = device_id
         self.host = host
         self.port = port
         self.status_callback = status_callback
         self.connection_mode = connection_mode
 
+        # HSMS 타임아웃 설정
+        self.t3_timeout = t3
+        self.t5_timeout = t5
+        self.t6_timeout = t6
+        self.t7_timeout = t7
+        
         # 연결 관리
         self._server: Optional[asyncio.AbstractServer] = None
         self._connection: Optional[HsmsConnection] = None
@@ -37,6 +45,7 @@ class DeviceAgent:
         self._main_task: Optional[asyncio.Task] = None
         self._command_processor_task: Optional[asyncio.Task] = None
         self._heartbeat_task: Optional[asyncio.Task] = None
+        self._t5_timer_task: Optional[asyncio.Task] = None # T5 타이머 태스크 추가
         
         # 메시지 관리
         self._command_queue = asyncio.Queue()
@@ -123,49 +132,38 @@ class DeviceAgent:
         """클라이언트(Active) 모드 실행"""
         while not self._shutdown_event.is_set():
             try:
-                # ✅ [수정] 'Connecting' 상태도 노란색으로 명확히 표시
                 await self._update_status(f"Connecting to {self.host}:{self.port}...", "yellow")
-
-                # 연결 시도 (타임아웃 적용)
                 reader, writer = await asyncio.wait_for(
                     asyncio.open_connection(self.host, self.port),
-                    timeout=self.connection_timeout
+                    timeout=self.t7_timeout # connection_timeout을 t7_timeout으로 변경
                 )
                 
                 async with self._connection_lock:
                     await self._establish_connection(reader, writer)
-                    
-                    # Active 모드에서는 Select.req 전송
                     if self._connection:
                         await self._initiate_hsms_handshake()
                 
-                # 연결 유지 대기
                 if self._connection:
                     await self._connection.wait_for_disconnect()
-                
+                    
             except asyncio.TimeoutError:
-                await self._update_status("Connection timeout", "red")
+                await self._update_status(f"Connection Timeout (T7)", "red") # 타임아웃 메시지 명확화
             except ConnectionRefusedError:
                 await self._update_status("Connection refused", "red")
             except Exception as e:
                 await self._update_status(f"Connection error: {e}", "red")
             
-            # 재연결 대기
             if not self._shutdown_event.is_set():
                 await self._update_status(f"Reconnecting in {self.reconnect_delay}s...", "orange")
                 try:
-                    await asyncio.wait_for(
-                        self._shutdown_event.wait(), 
-                        timeout=self.reconnect_delay
-                    )
+                    await asyncio.wait_for(self._shutdown_event.wait(), timeout=self.reconnect_delay)
                 except asyncio.TimeoutError:
-                    pass  # 재연결 시도
+                    pass
 
     async def _establish_connection(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         """연결 설정"""
         try:
             peername = writer.get_extra_info('peername')
-            # ✅ [수정] HSMS 규약상 연결 직후는 'SELECTED'가 아니므로, 더 명확한 상태 메시지를 표시합니다.
             await self._update_status(f"Connected to {peername[0]}:{peername[1]}. Waiting for Select...", "orange")
 
             self._connection_state = ConnectionState.CONNECTED
@@ -177,18 +175,35 @@ class DeviceAgent:
                 state_change_callback=self._on_connection_state_change
             )
             
-            # 하트비트 시작
-            if self._heartbeat_task:
-                self._heartbeat_task.cancel()
-            self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+            # 하트비트 및 T5 타이머 시작
+            if self._heartbeat_task: self._heartbeat_task.cancel()
+            if self._t5_timer_task: self._t5_timer_task.cancel() # 기존 T5 타이머 정리
             
-            # ✅ [핵심 수정] 메시지 수신 루프를 await로 기다리지 않고,
-            # 백그라운드 태스크로 실행하여 프로그램 흐름이 계속 진행되도록 합니다.
+            self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+            self._t5_timer_task = asyncio.create_task(self._t5_timer_loop()) # T5 타이머 시작
+            
             asyncio.create_task(self._connection.handle_connection())
             
         except Exception as e:
             self.logger.error(f"Connection establishment failed: {e}")
             await self._cleanup_connection()
+
+    async def _t5_timer_loop(self):
+        """T5 유휴 연결 타이머 루프"""
+        try:
+            while not self._shutdown_event.is_set() and self._connection:
+                await asyncio.sleep(1) # 1초마다 확인
+                if self._connection:
+                    idle_time = time.monotonic() - self._connection.last_message_time
+                    if idle_time > self.t5_timeout:
+                        self.logger.warning(f"T5 timeout ({self.t5_timeout}s) exceeded. Disconnecting.")
+                        await self._update_status(f"Idle Timeout (T5)", "red")
+                        await self._cleanup_connection()
+                        break
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            self.logger.error(f"Error in T5 timer loop: {e}")
 
     async def _initiate_hsms_handshake(self):
         """HSMS 핸드셰이크 시작 (Active 모드)"""
@@ -207,19 +222,28 @@ class DeviceAgent:
                 await self._cleanup_connection()
 
     async def _heartbeat_loop(self):
-        """주기적 연결 상태 확인"""
+        """주기적 연결 상태 확인 (T6 기반)"""
         try:
+            # T6 타임아웃의 절반 주기로 Linktest 전송
+            linktest_interval = self.t6_timeout / 2
             while not self._shutdown_event.is_set() and self._connection:
-                await asyncio.sleep(self.heartbeat_interval)
+                await asyncio.sleep(linktest_interval)
                 
                 if self._connection and self._connection.is_selected:
                     try:
                         system_bytes = self._get_next_system_bytes()
-                        await self._connection.send_hsms_message(
+                        # Linktest 응답을 T6 시간 내에 기다림
+                        future = self._connection.send_hsms_message(
                             msg_type=HsmsMessageType.LINKTEST_REQ,
                             system_bytes=system_bytes
                         )
-                        self.logger.debug("Heartbeat sent")
+                        await asyncio.wait_for(future, timeout=self.t6_timeout)
+                        self.logger.debug("Heartbeat sent and reply received")
+                    except asyncio.TimeoutError:
+                        self.logger.error("Linktest (T6) timeout. Disconnecting.")
+                        await self._update_status("Linktest Timeout (T6)", "red")
+                        await self._cleanup_connection()
+                        break
                     except Exception as e:
                         self.logger.error(f"Heartbeat failed: {e}")
                         await self._cleanup_connection()
@@ -319,36 +343,32 @@ class DeviceAgent:
             self._server = None
 
     async def send_message(self, s: int, f: int, w_bit: bool = False, 
-                          body: Optional[list] = None, timeout: float = 10.0) -> Optional[dict]:
-        """메시지 전송 (응답 대기 포함)"""
+                          body: Optional[list] = None, timeout: float | None = None) -> Optional[dict]:
+        """메시지 전송 (T3 타임아웃 적용)"""
         if not await self._wait_for_ready(timeout=5.0):
             return None
+        
+        # 시나리오 스텝에서 지정한 timeout(T3)이 없으면, 장비의 기본 T3 값을 사용
+        reply_timeout = timeout if timeout is not None else self.t3_timeout
             
         system_bytes = self._get_next_system_bytes()
         
-        # 응답 대기가 필요한 경우 Future 생성
         response_future = None
         if w_bit:
             response_future = asyncio.Future()
             self._pending_replies[system_bytes] = response_future
         
-        # 메시지 전송
-        command = {
-            "action": "send",
-            "s": s, "f": f, "w_bit": w_bit,
-            "body": body or [],
-            "system_bytes": system_bytes
-        }
+        command = {"action": "send", "s": s, "f": f, "w_bit": w_bit, "body": body or [], "system_bytes": system_bytes}
         await self._command_queue.put(command)
         
-        # 응답 대기
         if response_future:
             try:
-                response = await asyncio.wait_for(response_future, timeout=timeout)
+                # 설정된 T3 타임아웃으로 응답을 기다림
+                response = await asyncio.wait_for(response_future, timeout=reply_timeout)
                 return response
             except asyncio.TimeoutError:
                 self._pending_replies.pop(system_bytes, None)
-                await self._update_status(f"Timeout waiting for S{s}F{f+1} response", "red")
+                await self._update_status(f"Timeout (T3) waiting for S{s}F{f+1}", "red")
                 return None
         
         return {"system_bytes": system_bytes}

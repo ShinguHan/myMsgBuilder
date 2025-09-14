@@ -3,24 +3,40 @@
         "host": "127.0.0.1",
         "port": 5001,
         "type": "CV",
-        "connection_mode": "Passive"
+        "connection_mode": "Passive",
+        "t3": 10,
+        "t5": 10,
+        "t6": 5,
+        "t7": 10
     },
     "STK_01_Passive": {
         "host": "127.0.0.1",
         "port": 5002,
         "type": "Stocker",
-        "connection_mode": "Passive"
+        "connection_mode": "Passive",
+        "t3": 10,
+        "t5": 10,
+        "t6": 5,
+        "t7": 10
     },
     "HOST_Active_To_5001": {
         "host": "127.0.0.1",
         "port": 5001,
         "type": "CV",
-        "connection_mode": "Active"
+        "connection_mode": "Active",
+        "t3": 10,
+        "t5": 10,
+        "t6": 5,
+        "t7": 10
     },
     "HOST_Active_To_5002": {
         "host": "127.0.0.1",
         "port": 5002,
         "type": "Stocker",
-        "connection_mode": "Active"
+        "connection_mode": "Active",
+        "t3": 10,
+        "t5": 10,
+        "t6": 5,
+        "t7": 10
     }
 }
