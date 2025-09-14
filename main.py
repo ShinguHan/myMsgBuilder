@@ -2,7 +2,7 @@
 import sys
 import asyncio
 import qasync
-
+import os
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QFile, QTextStream
 
@@ -10,6 +10,16 @@ from secs_simulator.engine.orchestrator import Orchestrator
 from secs_simulator.ui.main_window import MainWindow
 import logging # logging 모듈 추가
 from secs_simulator.ui.log_viewer import QtLogHandler # 새로 만든 핸들러 임포트
+
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
 
 async def status_update_callback(window: MainWindow, device_id: str, status: str, color: str):
     """Orchestrator가 UI 업데이트를 위해 호출할 콜백. UI의 Signal을 emit합니다."""
@@ -61,7 +71,13 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
 
     try:
-        qss_file = QFile("./secs_simulator/ui/styles/apple_style.qss")
+        # --- 수정 전 ---
+        # qss_file = QFile("./secs_simulator/ui/styles/apple_style.qss")
+        
+        # --- 수정 후 ---
+        qss_path = resource_path("secs_simulator/ui/styles/apple_style.qss")
+        qss_file = QFile(qss_path)
+        
         if qss_file.open(QFile.OpenModeFlag.ReadOnly | QFile.OpenModeFlag.Text):
             stream = QTextStream(qss_file)
             app.setStyleSheet(stream.readAll())

@@ -1,9 +1,18 @@
 # log_converter.py
 import os
+import sys
 import json
 import argparse
 import re # 👈 정규표현식 모듈 임포트
 from log_importer import get_messages_from_log
+
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
 def get_value_from_path(data: list, path: list):
     """SECS-II 메시지 Body에서 경로에 해당하는 값을 추출합니다."""
@@ -133,8 +142,12 @@ def generate_assets(log_file: str, profile_file: str, rules_file: str, output_di
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate SECS simulator assets from log files.")
     parser.add_argument("logfile", help="Path to the log file to be analyzed.")
-    parser.add_argument("--profile", default="profile.json", help="Path to the log parsing profile JSON file.")
-    parser.add_argument("--rules", default="message_key_rules.json", help="Path to the message key generation rules JSON file.")
+    # parser.add_argument("--profile", default="profile.json", help="Path to the log parsing profile JSON file.")
+    # parser.add_argument("--rules", default="message_key_rules.json", help="Path to the message key generation rules JSON file.")
+    # --- 수정 후 ---
+    parser.add_argument("--profile", default=resource_path("profile.json"), help="Path to the log parsing profile JSON file.")
+    parser.add_argument("--rules", default=resource_path("message_key_rules.json"), help="Path to the message key generation rules JSON file.")
+    
     parser.add_argument("--out", default="./generated_assets", help="Directory to save the generated files.")
     parser.add_argument("--device", default="MyDevice", help="Device ID to use in the scenario.")
     

@@ -8,6 +8,8 @@ from typing import Dict
 import asyncio
 import json
 import logging
+import sys
+import os
 
 from secs_simulator.engine.orchestrator import Orchestrator
 from secs_simulator.ui.device_status_widget import DeviceStatusWidget
@@ -16,8 +18,19 @@ from secs_simulator.engine.scenario_manager import ScenarioManager
 from secs_simulator.ui.add_device_dialog import AddDeviceDialog
 from .log_viewer_window import LogViewerWindow
 
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
-DEVICE_CONFIG_PATH = './secs_simulator/engine/devices.json'
+# --- 수정 전 ---
+# DEVICE_CONFIG_PATH = './secs_simulator/engine/devices.json'
+
+# --- 수정 후 ---
+DEVICE_CONFIG_PATH = resource_path('secs_simulator/engine/devices.json')
 
 class MainWindow(QMainWindow):
     agent_status_updated = Signal(str, str, str)
@@ -28,9 +41,17 @@ class MainWindow(QMainWindow):
         self.shutdown_future = shutdown_future
         self.log_viewer_window = LogViewerWindow()
         device_configs = orchestrator.load_device_configs(DEVICE_CONFIG_PATH)
+        # --- 수정 전 ---
+        # self.scenario_manager = ScenarioManager(
+        #     device_configs=device_configs,
+        #     message_library_dir='./resources/messages'
+        # )
+
+        # --- 수정 후 ---
+        resources_dir = resource_path('resources/messages')
         self.scenario_manager = ScenarioManager(
             device_configs=device_configs,
-            message_library_dir='./resources/messages'
+            message_library_dir=resources_dir
         )
         self.device_widgets: Dict[str, DeviceStatusWidget] = {}
         self.selected_device_id: str | None = None
