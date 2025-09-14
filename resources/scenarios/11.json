@@ -2,58 +2,186 @@
     "name": "VisualEditorScenario",
     "steps": [
         {
-            "device_id": "STK_01",
+            "device_id": "Select Device...",
             "delay": 0.0,
-            "message_id": "S1F1_AreYouThere",
+            "message_id": "S6F11_CEID[251]_Request",
             "message": {
-                "s": 1,
-                "f": 1,
-                "w_bit": true,
-                "body": []
-            }
-        },
-        {
-            "device_id": "STK_01",
-            "delay": 0.0,
-            "message_id": "S1F1_AreYouThere",
-            "message": {
-                "s": 1,
-                "f": 1,
-                "w_bit": true,
-                "body": []
-            }
-        },
-        {
-            "device_id": "STK_01",
-            "delay": 0.0,
-            "message_id": "S5F1_AlarmReport",
-            "message": {
-                "s": 5,
-                "f": 1,
+                "s": 6,
+                "f": 11,
                 "w_bit": true,
                 "body": [
                     {
                         "type": "L",
                         "value": [
                             {
-                                "type": "B",
-                                "value": 1
+                                "type": "U2",
+                                "value": [
+                                    0
+                                ]
                             },
                             {
-                                "type": "U4",
-                                "value": 1001
+                                "type": "U2",
+                                "value": [
+                                    251
+                                ]
                             },
                             {
                                 "type": "L",
-                                "value": []
+                                "value": [
+                                    {
+                                        "type": "L",
+                                        "value": [
+                                            {
+                                                "type": "U2",
+                                                "value": [
+                                                    19
+                                                ]
+                                            },
+                                            {
+                                                "type": "L",
+                                                "value": [
+                                                    {
+                                                        "type": "L",
+                                                        "value": [
+                                                            {
+                                                                "type": "A",
+                                                                "value": "J1FCNV12305-104"
+                                                            },
+                                                            {
+                                                                "type": "A",
+                                                                "value": "LHAE000336"
+                                                            },
+                                                            {
+                                                                "type": "U2",
+                                                                "value": [
+                                                                    0
+                                                                ]
+                                                            },
+                                                            {
+                                                                "type": "U2",
+                                                                "value": [
+                                                                    0
+                                                                ]
+                                                            },
+                                                            {
+                                                                "type": "U2",
+                                                                "value": [
+                                                                    4
+                                                                ]
+                                                            },
+                                                            {
+                                                                "type": "A",
+                                                                "value": ""
+                                                            },
+                                                            {
+                                                                "type": "L",
+                                                                "value": []
+                                                            },
+                                                            {
+                                                                "type": "U2",
+                                                                "value": [
+                                                                    0
+                                                                ]
+                                                            },
+                                                            {
+                                                                "type": "U2",
+                                                                "value": [
+                                                                    0
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
                             }
                         ]
                     }
                 ]
-            }
+            },
+            "id": "2fc4998c-6fe6-45cb-b41e-aa74353a32f8"
         },
         {
-            "device_id": "STK_01",
+            "device_id": "Select Device...",
+            "delay": 0.0,
+            "message_id": "S6F11_CEID[158]_Request",
+            "message": {
+                "s": 6,
+                "f": 11,
+                "w_bit": true,
+                "body": [
+                    {
+                        "type": "L",
+                        "value": [
+                            {
+                                "type": "U2",
+                                "value": [
+                                    0
+                                ]
+                            },
+                            {
+                                "type": "U2",
+                                "value": [
+                                    158
+                                ]
+                            },
+                            {
+                                "type": "L",
+                                "value": [
+                                    {
+                                        "type": "L",
+                                        "value": [
+                                            {
+                                                "type": "U2",
+                                                "value": [
+                                                    17
+                                                ]
+                                            },
+                                            {
+                                                "type": "L",
+                                                "value": [
+                                                    {
+                                                        "type": "A",
+                                                        "value": "LHAE000336"
+                                                    },
+                                                    {
+                                                        "type": "A",
+                                                        "value": "J1FCNV12305-104"
+                                                    },
+                                                    {
+                                                        "type": "U2",
+                                                        "value": [
+                                                            0
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            },
+            "id": "16b21c8f-1aab-47c8-a879-8dc05b3f2813"
+        },
+        {
+            "device_id": "Select Device...",
+            "delay": 0.0,
+            "message_id": "S1F1_AreYouThere",
+            "message": {
+                "s": 1,
+                "f": 1,
+                "w_bit": true,
+                "body": []
+            },
+            "id": "becaee7f-21c0-41d0-baaa-a2a1ab73466d"
+        },
+        {
+            "device_id": "Select Device...",
             "delay": 0.0,
             "message_id": "S5F1_AlarmReport",
             "message": {
@@ -71,14 +199,281 @@
                             {
                                 "type": "U4",
                                 "value": 1001
+                            },
+                            {
+                                "type": "A",
+                                "value": "Stocker Door Open Timeout"
                             }
                         ]
                     }
                 ]
-            }
+            },
+            "id": "ba263397-e3b4-4eca-9a56-8c51d3d24449"
         },
         {
-            "device_id": "STK_01",
+            "device_id": "CV_01_Passive",
+            "delay": 0.0,
+            "message_id": "S6F11_CEID[158]_Request",
+            "message": {
+                "s": 6,
+                "f": 11,
+                "w_bit": true,
+                "body": [
+                    {
+                        "type": "L",
+                        "value": [
+                            {
+                                "type": "U2",
+                                "value": [
+                                    0
+                                ]
+                            },
+                            {
+                                "type": "U2",
+                                "value": [
+                                    158
+                                ]
+                            },
+                            {
+                                "type": "L",
+                                "value": [
+                                    {
+                                        "type": "L",
+                                        "value": [
+                                            {
+                                                "type": "U2",
+                                                "value": [
+                                                    17
+                                                ]
+                                            },
+                                            {
+                                                "type": "L",
+                                                "value": [
+                                                    {
+                                                        "type": "A",
+                                                        "value": "LHAE000336"
+                                                    },
+                                                    {
+                                                        "type": "A",
+                                                        "value": "J1FCNV12305-104"
+                                                    },
+                                                    {
+                                                        "type": "U2",
+                                                        "value": [
+                                                            0
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            },
+            "id": "fd1164db-67aa-4327-a38e-b80a32a20143"
+        },
+        {
+            "device_id": "Select Device...",
+            "delay": 0.0,
+            "message_id": "S6F11_CEID[158]_Request",
+            "message": {
+                "s": 6,
+                "f": 11,
+                "w_bit": true,
+                "body": [
+                    {
+                        "type": "L",
+                        "value": [
+                            {
+                                "type": "U2",
+                                "value": [
+                                    0
+                                ]
+                            },
+                            {
+                                "type": "U2",
+                                "value": [
+                                    158
+                                ]
+                            },
+                            {
+                                "type": "L",
+                                "value": [
+                                    {
+                                        "type": "L",
+                                        "value": [
+                                            {
+                                                "type": "U2",
+                                                "value": [
+                                                    17
+                                                ]
+                                            },
+                                            {
+                                                "type": "L",
+                                                "value": [
+                                                    {
+                                                        "type": "A",
+                                                        "value": "LHAE000336"
+                                                    },
+                                                    {
+                                                        "type": "A",
+                                                        "value": "J1FCNV12305-104"
+                                                    },
+                                                    {
+                                                        "type": "U2",
+                                                        "value": [
+                                                            0
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            },
+            "id": "cf24045b-ebfb-4011-98c6-a7bff4ae5126"
+        },
+        {
+            "device_id": "Select Device...",
+            "delay": 0.0,
+            "message_id": "S6F11_CEID[251]_Request",
+            "message": {
+                "s": 6,
+                "f": 11,
+                "w_bit": true,
+                "body": [
+                    {
+                        "type": "L",
+                        "value": [
+                            {
+                                "type": "U2",
+                                "value": [
+                                    0
+                                ]
+                            },
+                            {
+                                "type": "U2",
+                                "value": [
+                                    251
+                                ]
+                            },
+                            {
+                                "type": "L",
+                                "value": [
+                                    {
+                                        "type": "L",
+                                        "value": [
+                                            {
+                                                "type": "U2",
+                                                "value": [
+                                                    19
+                                                ]
+                                            },
+                                            {
+                                                "type": "L",
+                                                "value": [
+                                                    {
+                                                        "type": "L",
+                                                        "value": [
+                                                            {
+                                                                "type": "A",
+                                                                "value": "J1FCNV12305-104"
+                                                            },
+                                                            {
+                                                                "type": "A",
+                                                                "value": "LHAE000336"
+                                                            },
+                                                            {
+                                                                "type": "U2",
+                                                                "value": [
+                                                                    0
+                                                                ]
+                                                            },
+                                                            {
+                                                                "type": "U2",
+                                                                "value": [
+                                                                    0
+                                                                ]
+                                                            },
+                                                            {
+                                                                "type": "U2",
+                                                                "value": [
+                                                                    4
+                                                                ]
+                                                            },
+                                                            {
+                                                                "type": "A",
+                                                                "value": ""
+                                                            },
+                                                            {
+                                                                "type": "L",
+                                                                "value": []
+                                                            },
+                                                            {
+                                                                "type": "U2",
+                                                                "value": [
+                                                                    0
+                                                                ]
+                                                            },
+                                                            {
+                                                                "type": "U2",
+                                                                "value": [
+                                                                    0
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            },
+            "id": "f251cf1f-55bb-41fc-bdbb-6f8adce4e365"
+        },
+        {
+            "device_id": "Select Device...",
+            "delay": 0.0,
+            "message_id": "S5F1_AlarmReport",
+            "message": {
+                "s": 5,
+                "f": 1,
+                "w_bit": true,
+                "body": [
+                    {
+                        "type": "L",
+                        "value": [
+                            {
+                                "type": "B",
+                                "value": 1
+                            },
+                            {
+                                "type": "U4",
+                                "value": 1001
+                            },
+                            {
+                                "type": "A",
+                                "value": "Stocker Door Open Timeout"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "id": "aa974ca6-118f-4795-a759-277ac53e88c8"
+        },
+        {
+            "device_id": "Select Device...",
             "delay": 0.0,
             "message_id": "S1F1_AreYouThere",
             "message": {
@@ -86,7 +481,8 @@
                 "f": 1,
                 "w_bit": true,
                 "body": []
-            }
+            },
+            "id": "bb2490cb-5291-4233-8898-e671b8e1030b"
         }
     ]
 }
