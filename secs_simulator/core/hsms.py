@@ -356,23 +356,22 @@ class HsmsConnection:
 
         async with self._send_lock:
             try:
-                s_with_w_bit = s | 0x80 if w_bit else s
-                
+                s_byte = s | 0x80 if w_bit else s
+                stype = msg_type.value
                 ptype = 0
-                stype = msg_type.value if msg_type != HsmsMessageType.DATA_MESSAGE else 0
                 
-                # 제어 메시지일 경우 S와 F는 0으로 설정
+                # ✅ [핵심 수정] 제어 메시지는 Session ID를 0xFFFF로, 데이터 메시지는 0으로 설정합니다.
+                session_id = 0xFFFF if msg_type != HsmsMessageType.DATA_MESSAGE else 0
+                
                 if msg_type != HsmsMessageType.DATA_MESSAGE:
-                    s_with_w_bit = 0
+                    s_byte = 0
                     f = 0
-
-                # PType과 SType을 2바이트 필드로 조합
+                
                 ptype_stype_field = (ptype << 8) | stype
 
                 # ✅ [핵심 수정] 제어 메시지는 Session ID를 0xFFFF로, 데이터 메시지는 0으로 설정합니다.
                 session_id = 0xFFFF if msg_type != HsmsMessageType.DATA_MESSAGE else 0
-                header = struct.pack('>HBBHI', session_id, s_with_w_bit, f, ptype_stype_field, system_bytes)
-                
+                header = struct.pack('>HBBHI', session_id, s_byte, f, ptype_stype_field, system_bytes)
                 payload = header + body
                 length_bytes = len(payload).to_bytes(4, 'big')
                 

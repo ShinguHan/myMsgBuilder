@@ -114,6 +114,7 @@ class Orchestrator:
         self._scenario_task = asyncio.create_task(self._run_scenario_steps(scenario_data))
 
     async def _run_scenario_steps(self, scenario_data: Dict[str, Any]) -> None:
+        """[수정됨] 트랜잭션 기반의 시나리오 스텝을 실행합니다."""
         try:
             for step in scenario_data.get('steps', []):
                 if not self.is_running:
@@ -122,47 +123,49 @@ class Orchestrator:
 
                 device_id = step.get('device_id')
                 target_agent = self._agents.get(device_id)
+                if not target_agent:
+                    continue
 
+                # --- 'Send Message' 스텝 처리 ---
                 if 'message' in step:
-                    if not target_agent:
-                        continue
                     message = step['message']
                     w_bit = message.get('w_bit', False)
-                    # ✅ [핵심 수정] 시나리오 스텝에 'timeout'이 정의되어 있으면 T3 값으로 사용
-                    t3_timeout = step.get('timeout') 
                     
-                    sent_result = await target_agent.send_message(
+                    # 1. 메시지를 보내고, 요청에 사용된 system_bytes를 받습니다.
+                    sent_system_bytes = await target_agent.send_message(
                         s=message.get('s', 0),
                         f=message.get('f', 0),
                         w_bit=w_bit,
-                        body=message.get('body'),
-                        timeout=t3_timeout # timeout 값을 전달
+                        body=message.get('body')
                     )
                     
-                    if w_bit and sent_result:
-                         self._last_request_context[device_id] = sent_result.get("system_bytes")
+                    # 2. 만약 응답이 필요한 메시지였다면, 해당 system_bytes를 저장해 둡니다.
+                    if w_bit:
+                        self._last_request_context[device_id] = sent_system_bytes
 
+                # --- 'Wait for Reply' 스텝 처리 ---
                 elif 'wait_recv' in step:
-                    if not target_agent:
-                        continue
-                    
+                    # 3. 이전에 저장해 둔 요청의 system_bytes를 가져옵니다.
                     system_bytes_to_wait_for = self._last_request_context.get(device_id)
                     if system_bytes_to_wait_for is None:
-                        error_msg = f"Scenario FAIL: Device '{device_id}' is waiting for a reply..."
-                        print(error_msg)
+                        error_msg = f"Scenario FAIL: Device '{device_id}' is waiting for a reply, but no prior request was made."
                         await self._status_callback("Orchestrator", error_msg, "red")
                         break
                     
                     match_criteria = step['wait_recv']
                     s, f, timeout = match_criteria.get('s'), match_criteria.get('f'), step.get('timeout', 10.0)
 
-                    if s is not None and f is not None:
-                        result = await target_agent.wait_for_message(s, f, timeout, system_bytes=system_bytes_to_wait_for)
-                        if result is None:
-                            error_msg = f"Scenario FAIL: Timed out waiting for S{s}F{f} from {device_id}"
-                            print(error_msg)
-                            await self._status_callback("Orchestrator", error_msg, "red")
-                            break
+                    # 4. S/F 정보와 함께, 기다려야 할 정확한 system_bytes를 전달합니다.
+                    result = await target_agent.wait_for_message(
+                        s=s, 
+                        f=f, 
+                        timeout=timeout, 
+                        reply_to_system_bytes=system_bytes_to_wait_for
+                    )
+                    if result is None:
+                        error_msg = f"Scenario FAIL: Timed out waiting for reply to request (SB={system_bytes_to_wait_for}) from {device_id}"
+                        await self._status_callback("Orchestrator", error_msg, "red")
+                        break
                 
                 if (delay := step.get('delay', 0)) > 0:
                     await asyncio.sleep(delay)
@@ -171,7 +174,6 @@ class Orchestrator:
             print("Scenario execution was cancelled.")
         finally:
             self.is_running = False
-            print("Scenario finished.")
             await self._status_callback("Orchestrator", "Scenario Finished", "blue")
 
     def send_single_message(self, device_id: str, message: dict):

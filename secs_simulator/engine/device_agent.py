@@ -343,35 +343,31 @@ class DeviceAgent:
             self._server = None
 
     async def send_message(self, s: int, f: int, w_bit: bool = False, 
-                          body: Optional[list] = None, timeout: float | None = None) -> Optional[dict]:
-        """메시지 전송 (T3 타임아웃 적용)"""
+                          body: Optional[list] = None) -> int:
+        """
+        [수정됨] 메시지를 즉시 전송하고, 응답을 기다리지 않고 system_bytes를 반환합니다.
+        """
         if not await self._wait_for_ready(timeout=5.0):
-            return None
-        
-        # 시나리오 스텝에서 지정한 timeout(T3)이 없으면, 장비의 기본 T3 값을 사용
-        reply_timeout = timeout if timeout is not None else self.t3_timeout
+            # 연결이 준비되지 않으면 -1과 같은 실패 값을 반환할 수 있습니다.
+            return -1
             
         system_bytes = self._get_next_system_bytes()
         
-        response_future = None
+        # w_bit가 True일 때만 응답을 기다리기 위한 Future를 생성합니다.
         if w_bit:
-            response_future = asyncio.Future()
-            self._pending_replies[system_bytes] = response_future
+            self._pending_replies[system_bytes] = asyncio.Future()
         
-        command = {"action": "send", "s": s, "f": f, "w_bit": w_bit, "body": body or [], "system_bytes": system_bytes}
+        # 메시지 전송 명령을 큐에 넣습니다.
+        command = {
+            "action": "send",
+            "s": s, "f": f, "w_bit": w_bit,
+            "body": body or [],
+            "system_bytes": system_bytes
+        }
         await self._command_queue.put(command)
         
-        if response_future:
-            try:
-                # 설정된 T3 타임아웃으로 응답을 기다림
-                response = await asyncio.wait_for(response_future, timeout=reply_timeout)
-                return response
-            except asyncio.TimeoutError:
-                self._pending_replies.pop(system_bytes, None)
-                await self._update_status(f"Timeout (T3) waiting for S{s}F{f+1}", "red")
-                return None
-        
-        return {"system_bytes": system_bytes}
+        # 응답을 기다리지 않고, 요청에 사용된 system_bytes를 즉시 반환합니다.
+        return system_bytes
 
     async def _wait_for_ready(self, timeout: float = 5.0) -> bool:
         """연결 준비 상태 대기"""
@@ -422,10 +418,32 @@ class DeviceAgent:
         except Exception as e:
             await self._update_status(f"Send failed: {e}", "red")
 
-    async def wait_for_message(self, s: int, f: int, timeout: float = 10.0) -> Optional[dict]:
-        """특정 메시지 대기"""
+    async def wait_for_message(self, s: int, f: int, timeout: float = 10.0, 
+                               reply_to_system_bytes: Optional[int] = None) -> Optional[dict]:
+        """
+        [수정됨] 특정 메시지 또는 특정 요청에 대한 응답을 기다립니다.
+        """
+        # --- 특정 요청(system_bytes)에 대한 응답을 기다리는 경우 ---
+        if reply_to_system_bytes is not None:
+            await self._update_status(f"Waiting for reply to SB={reply_to_system_bytes}", "yellow")
+            future = self._pending_replies.get(reply_to_system_bytes)
+            if not future:
+                await self._update_status(f"Error: No pending reply found for SB={reply_to_system_bytes}", "red")
+                return None
+            
+            try:
+                # 해당 future가 완료될 때까지 기다립니다.
+                response = await asyncio.wait_for(future, timeout=timeout)
+                # 완료 후에는 딕셔너리에서 제거합니다.
+                self._pending_replies.pop(reply_to_system_bytes, None)
+                return response
+            except asyncio.TimeoutError:
+                self._pending_replies.pop(reply_to_system_bytes, None)
+                await self._update_status(f"Timeout waiting for reply to SB={reply_to_system_bytes}", "red")
+                return None
+
+        # --- 일반 메시지(S/F)를 기다리는 경우 (기존 로직) ---
         await self._update_status(f"Waiting for S{s}F{f}", "yellow")
-        
         try:
             async with asyncio.timeout(timeout):
                 while True:
@@ -433,9 +451,8 @@ class DeviceAgent:
                     if msg.get('s') == s and msg.get('f') == f:
                         return msg
                     else:
-                        # 다시 큐에 넣기 (다른 대기자를 위해)
                         await self._incoming_message_queue.put(msg)
-                        await asyncio.sleep(0.01)  # CPU 사용량 방지
+                        await asyncio.sleep(0.01)
         except asyncio.TimeoutError:
             await self._update_status(f"Timeout waiting for S{s}F{f}", "red")
             return None
