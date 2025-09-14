@@ -15,7 +15,6 @@ from secs_simulator.ui.scenario_editor.scenario_editor_widget import ScenarioEdi
 from secs_simulator.engine.scenario_manager import ScenarioManager
 from secs_simulator.ui.add_device_dialog import AddDeviceDialog
 from .log_viewer_window import LogViewerWindow
-from secs_simulator.ui.log_viewer import LogViewer
 
 
 DEVICE_CONFIG_PATH = './secs_simulator/engine/devices.json'
@@ -67,7 +66,7 @@ class MainWindow(QMainWindow):
         
         self.collapsible_container = QWidget()
         collapsible_layout = QVBoxLayout(self.collapsible_container)
-        collapsible_layout.setContentsMargins(10, 0, 10, 10) # 하단 여백 추가
+        collapsible_layout.setContentsMargins(10, 0, 10, 10)
         collapsible_layout.setSpacing(10)
 
         control_layout = QHBoxLayout()
@@ -87,11 +86,13 @@ class MainWindow(QMainWindow):
         self.device_list_layout.setSpacing(10)
         self.device_list_layout.addStretch()
         scroll_area.setWidget(scroll_content)
-        collapsible_layout.addWidget(scroll_area)
         
-        left_layout.addWidget(self.collapsible_container)
+        # ✅ [레이아웃 수정 1] scroll_area가 collapsible_layout 내부에서 확장되도록 stretch factor(1)를 부여합니다.
+        collapsible_layout.addWidget(scroll_area, 1)
         
-        # ✅ [레이아웃 수정 1] 관리 버튼 프레임을 left_layout에 직접 추가
+        # ✅ [레이아웃 수정 2] collapsible_container가 left_layout 내부에서 확장되도록 stretch factor(1)를 부여합니다.
+        left_layout.addWidget(self.collapsible_container, 1)
+        
         management_frame = QFrame()
         management_frame.setObjectName("managementFrame")
         device_management_layout = QHBoxLayout(management_frame)
@@ -113,10 +114,10 @@ class MainWindow(QMainWindow):
         device_management_layout.addWidget(edit_button)
         device_management_layout.addWidget(delete_button)
 
-        # ✅ [레이아웃 수정 2] Stretch를 버튼 위로 옮겨 버튼을 맨 아래로 고정
-        left_layout.addStretch()
+        # ✅ [레이아웃 수정 3] 불필요한 addStretch()를 제거하고 management_frame을 맨 아래에 추가합니다.
         left_layout.addWidget(management_frame)
 
+        # --- Right Panel ---
         right_splitter = QWidget()
         right_layout = QVBoxLayout(right_splitter)
         self.editor_widget = ScenarioEditorWidget(self.scenario_manager, device_configs)
@@ -146,12 +147,15 @@ class MainWindow(QMainWindow):
         self.editor_widget.manual_send_requested.connect(self.orchestrator.send_single_message)
 
     def toggle_left_panel(self):
-        # ... (기존 코드와 동일)
         start_width = self.left_panel.width()
         is_collapsing = start_width > 50
         end_width = 50 if is_collapsing else 300
 
         self.collapsible_container.setVisible(True)
+        # ✅ [레이아웃 수정 4] 패널 하단 버튼 프레임도 함께 접히도록 로직에 추가
+        management_frame = self.left_panel.findChild(QFrame, "managementFrame")
+        if management_frame:
+            management_frame.setVisible(True)
 
         self.animation_group = QParallelAnimationGroup(self)
         anim_max = QPropertyAnimation(self.left_panel, b"maximumWidth")
@@ -173,8 +177,9 @@ class MainWindow(QMainWindow):
 
         if is_collapsing:
             self.toggle_button.setText("▶")
-            # ✅ [레이아웃 수정 3] 애니메이션 시작과 동시에 컨텐츠 숨김
             self.collapsible_container.setVisible(False)
+            if management_frame:
+                management_frame.setVisible(False)
         else:
             self.toggle_button.setText("◀ Devices")
 
@@ -282,11 +287,9 @@ class MainWindow(QMainWindow):
             new_info = dialog.get_device_info()
             if new_info:
                 new_device_id = new_info.pop("id")
-                # ✅ [Delete 버튼 수정 1] 비동기 작업을 별도 async 함수로 분리
                 asyncio.create_task(self._edit_and_refresh(self.selected_device_id, new_device_id, new_info))
 
     async def _edit_and_refresh(self, old_id, new_id, config):
-        """✅ [추가] 디바이스 수정 후 UI를 안전하게 새로고침하는 비동기 메서드"""
         await self.orchestrator.edit_device(old_id, new_id, config)
         new_configs = self.orchestrator.load_device_configs(DEVICE_CONFIG_PATH)
         self.populate_device_widgets(new_configs)
@@ -305,16 +308,14 @@ class MainWindow(QMainWindow):
         )
 
         if reply == QMessageBox.StandardButton.Yes:
-            # ✅ [Delete 버튼 수정 2] 비동기 작업을 별도 async 함수로 분리
             asyncio.create_task(self._delete_and_refresh(self.selected_device_id))
 
     async def _delete_and_refresh(self, device_id_to_delete):
-        """✅ [추가] 디바이스 삭제 후 UI를 안전하게 새로고침하는 비동기 메서드"""
         await self.orchestrator.delete_device(device_id_to_delete)
         new_configs = self.orchestrator.load_device_configs(DEVICE_CONFIG_PATH)
         self.populate_device_widgets(new_configs)
         logging.info(f"--- Device '{device_id_to_delete}' was deleted. ---")
-        self.selected_device_id = None # 선택 상태 초기화
+        self.selected_device_id = None
 
     def load_and_populate_libraries(self):
         all_libs = self.scenario_manager.get_all_message_libraries()
