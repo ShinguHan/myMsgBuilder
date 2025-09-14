@@ -21,6 +21,40 @@ class HsmsMessageType(IntEnum):
     REJECT_REQ = 7
     SEPARATE_REQ = 9
 
+    # --- 로깅을 위한 헬퍼 함수 ---
+def _convert_secs_item_to_dict(item: SecsItem) -> dict:
+    """SecsItem 객체를 JSON 직렬화 가능한 딕셔너리로 안전하게 변환합니다."""
+    value = item.value
+    if isinstance(value, list) and all(isinstance(i, SecsItem) for i in value):
+        value = [_convert_secs_item_to_dict(sub_item) for sub_item in value]
+    # ✅ [핵심 수정] bytes 타입이면 hex 문자열로 변환합니다.
+    elif isinstance(value, bytes):
+        value = value.hex().upper()
+    
+    return {"type": item.type, "value": value}
+
+def _preprocess_body_for_json(body: list) -> list:
+    """전송 전 메시지(dict 리스트) 내부의 bytes를 hex 문자열로 재귀적으로 변환합니다."""
+    if not isinstance(body, list):
+        return body
+
+    new_body = []
+    for item in body:
+        if not isinstance(item, dict):
+            new_body.append(item)
+            continue
+
+        new_item = item.copy()
+        value = new_item.get('value')
+
+        if isinstance(value, bytes):
+            new_item['value'] = value.hex().upper()
+        elif isinstance(value, list) and new_item.get('type') == 'L':
+            new_item['value'] = _preprocess_body_for_json(value)
+        
+        new_body.append(new_item)
+    return new_body
+
 # --- SecsItem을 JSON으로 변환하기 위한 헬퍼 함수 ---
 def secs_item_to_dict(item: SecsItem) -> dict:
     """SecsItem 객체를 JSON 직렬화 가능한 딕셔너리로 변환합니다."""
@@ -188,8 +222,8 @@ class HsmsConnection:
         try:
             parsed_body = parse_body(body) if body else []
             
-            # ✅ [핵심 추가] 수신된 메시지의 Body 내용을 DEBUG 레벨로 로깅합니다.
-            body_for_log = [secs_item_to_dict(item) for item in parsed_body]
+            # ✅ [핵심 수정] 수신된 메시지 Body를 로깅하기 전에 안전하게 변환합니다.
+            body_for_log = [_convert_secs_item_to_dict(item) for item in parsed_body]
             self.logger.debug(f"RECV S{s}F{f} Body: {json.dumps(body_for_log)}")
 
 
@@ -230,8 +264,9 @@ class HsmsConnection:
             raise RuntimeError("Connection not selected")
             
         try:
-            # ✅ [핵심 추가] 전송할 메시지의 Body 내용을 DEBUG 레벨로 로깅합니다.
-            self.logger.debug(f"SEND S{s}F{f} Body: {json.dumps(body_obj or [])}")
+             # ✅ [핵심 수정] 전송할 메시지 Body를 로깅하기 전에 안전하게 변환합니다.
+            body_for_log = _preprocess_body_for_json(body_obj or [])
+            self.logger.debug(f"SEND S{s}F{f} Body: {json.dumps(body_for_log)}")
             
             body_bytes = build_secs_body(body_obj or [])
             await self.send_hsms_message(
@@ -334,7 +369,10 @@ class HsmsConnection:
                 # PType과 SType을 2바이트 필드로 조합
                 ptype_stype_field = (ptype << 8) | stype
 
-                header = struct.pack('>HBBHI', 0, s_with_w_bit, f, ptype_stype_field, system_bytes)
+                # ✅ [핵심 수정] 제어 메시지는 Session ID를 0xFFFF로, 데이터 메시지는 0으로 설정합니다.
+                session_id = 0xFFFF if msg_type != HsmsMessageType.DATA_MESSAGE else 0
+                header = struct.pack('>HBBHI', session_id, s_with_w_bit, f, ptype_stype_field, system_bytes)
+                
                 payload = header + body
                 length_bytes = len(payload).to_bytes(4, 'big')
                 
