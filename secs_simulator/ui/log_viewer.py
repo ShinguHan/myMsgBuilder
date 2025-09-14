@@ -41,7 +41,7 @@ class LogViewer(QWidget):
         filter_layout.addWidget(QLabel("Log Level:"))
         self.level_filter = QComboBox()
         self.level_filter.addItems(["DEBUG", "INFO", "WARNING", "ERROR"])
-        self.level_filter.setCurrentText("INFO")
+        self.level_filter.setCurrentText("DEBUG")
         self.level_filter.currentIndexChanged.connect(self.apply_filter)
         filter_layout.addWidget(self.level_filter)
         filter_layout.addStretch()
